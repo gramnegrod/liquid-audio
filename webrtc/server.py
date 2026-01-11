@@ -12,9 +12,11 @@ import time
 from typing import AsyncGenerator
 import numpy as np
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 from fastrtc import Stream, ReplyOnPause
 import torch
+import os
 
 from liquid_audio import LFM2AudioModel, LFM2AudioProcessor, ChatState, LFMModality
 
@@ -43,16 +45,33 @@ def load_models():
     logger.info(f"Loading {MODEL_ID}...")
 
     try:
-        _processor = LFM2AudioProcessor.from_pretrained(MODEL_ID)
-        _model = LFM2AudioModel.from_pretrained(
-            MODEL_ID,
-            torch_dtype=torch.bfloat16,  # Use BF16 for M4 efficiency
-            device_map="auto"  # Use MPS on macOS
-        )
-        _model.eval()
+        # Determine target device
+        if torch.cuda.is_available():
+            target_device = "cuda"
+            logger.info("✅ Using CUDA GPU")
+        elif torch.backends.mps.is_available():
+            target_device = "mps"
+            logger.info("✅ Using Apple Metal Performance Shaders (MPS)")
+        else:
+            target_device = "cpu"
+            logger.info("⚠️  Using CPU (this will be slow)")
+
+        # Load on CPU first (safetensors requirement), then move to target device
+        logger.info("Loading processor on CPU...")
+        _processor = LFM2AudioProcessor.from_pretrained(MODEL_ID, device="cpu").eval()
+
+        logger.info("Loading model on CPU...")
+        _model = LFM2AudioModel.from_pretrained(MODEL_ID, device="cpu").eval()
+
+        # Move to target device if not CPU
+        if target_device != "cpu":
+            logger.info(f"Moving models to {target_device.upper()}...")
+            _processor = _processor.to(target_device)
+            _model = _model.to(target_device)
+
         logger.info("✅ Models loaded successfully")
     except Exception as e:
-        logger.error(f"Failed to load models: {e}")
+        logger.error(f"❌ Failed to load models: {e}", exc_info=True)
         raise
 
 
@@ -181,10 +200,153 @@ async def startup():
     initialize_chat()
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """Health check"""
-    return {"status": "ok", "model": MODEL_ID}
+    """Serve WebRTC client UI"""
+    client_html_path = os.path.join(os.path.dirname(__file__), "client.html")
+    if os.path.exists(client_html_path):
+        with open(client_html_path, "r") as f:
+            return f.read()
+    else:
+        return """
+        <html>
+            <body style="font-family: sans-serif; padding: 20px;">
+                <h1>🎤 LFM2.5-Audio WebRTC Server</h1>
+                <p><strong>Status:</strong> ✅ Running</p>
+                <p><strong>Model:</strong> LiquidAI/LFM2.5-Audio-1.5B</p>
+                <p><strong>WebRTC Endpoint:</strong> /rtc</p>
+                <p>Client UI not found. Check server logs.</p>
+            </body>
+        </html>
+        """
+
+
+@app.post("/api/generate")
+async def generate_response(audio: UploadFile):
+    """HTTP fallback endpoint for audio processing (for client without WebRTC)"""
+    global _model, _processor, _chat_state
+
+    if _model is None or _processor is None:
+        logger.error("Models not loaded")
+        return {"error": "Models not loaded"}
+
+    try:
+        import io
+        from pydub import AudioSegment
+        import librosa
+
+        # Read audio from upload
+        audio_bytes = await audio.read()
+
+        # Decode WebM/Opus audio using pydub
+        try:
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
+        except:
+            # Fallback: try auto-detect format
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+
+        # Convert to numpy array
+        samples = np.array(audio_segment.get_array_of_samples())
+        sr = audio_segment.frame_rate
+
+        # Handle stereo
+        if audio_segment.channels == 2:
+            samples = samples.reshape((-1, 2))
+            samples = samples.mean(axis=1)
+
+        # Convert to float32 in range [-1, 1]
+        audio_array = samples.astype(np.float32) / 32768.0
+
+        # Resample to 16kHz if needed
+        if sr != SAMPLE_RATE:
+            audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=SAMPLE_RATE)
+
+        # Reshape to 2D (channels, samples) as required by add_audio
+        audio_array = audio_array.reshape(1, -1)
+
+        # Convert to torch tensor
+        audio_tensor = torch.from_numpy(audio_array).float()
+
+        logger.info(f"📥 Received {audio_tensor.shape[1]} samples ({audio_tensor.shape[1]/SAMPLE_RATE:.2f}s), sr: {sr}Hz, shape: {audio_tensor.shape}")
+
+        # Add to chat state and prepare for generation
+        _chat_state.add_audio(audio_tensor, SAMPLE_RATE)
+        _chat_state.end_turn()
+        _chat_state.new_turn("assistant")
+
+        # Generate response via interleaved generation
+        audio_tokens = []
+        text_output = ""
+        ttfa = None
+        inference_start = time.perf_counter()
+
+        with torch.no_grad():
+            # generate_interleaved expects **chat_state unpacking
+            for token_idx, token in enumerate(_model.generate_interleaved(
+                **_chat_state,
+                max_new_tokens=512,
+                audio_temperature=1.0,
+                audio_top_k=4
+            )):
+                # Check token type
+                if token.numel() == 1:
+                    # Text token
+                    text_token = _processor.text.decode(token)
+                    text_output += text_token
+
+                    if ttfa is None:
+                        ttfa = time.perf_counter() - inference_start
+                        logger.info(f"🎵 TTFA: {ttfa*1000:.1f}ms")
+                else:
+                    # Audio token (8 codebook indices from Mimi)
+                    audio_tokens.append(token)
+
+        # Decode all audio tokens
+        wav_output = None
+        wav_bytes = None
+        if audio_tokens:
+            logger.info(f"📊 Total audio tokens: {len(audio_tokens)}")
+            audio_codes = torch.stack(audio_tokens, dim=1)
+            with torch.no_grad():
+                # Decode audio codes to waveform
+                wav_output = _processor.decode(audio_codes)
+
+            # Convert to WAV format for browser playback
+            import scipy.io.wavfile as wavfile
+            wav_np = wav_output.squeeze().numpy() if wav_output.dim() > 1 else wav_output.numpy()
+            wav_int16 = (wav_np * 32767).astype(np.int16)
+
+            # Create WAV in memory
+            wav_buffer = io.BytesIO()
+            wavfile.write(wav_buffer, SAMPLE_RATE, wav_int16)
+            wav_bytes = wav_buffer.getvalue()
+
+            logger.info(f"📊 Generated {len(wav_int16)} audio samples ({len(wav_int16)/SAMPLE_RATE:.2f}s)")
+
+        total_time = time.perf_counter() - inference_start
+        audio_duration = len(audio_tokens) / 50.0 if audio_tokens else 0  # ~50 tokens/sec
+
+        logger.info(f"✅ Generation complete: {total_time:.2f}s, TTFA: {ttfa*1000:.1f}ms if applicable")
+        logger.info(f"📄 Full response: {text_output}")
+
+        response = {
+            "success": True,
+            "text": text_output,
+            "ttfa_ms": int(ttfa * 1000) if ttfa else 0,
+            "total_ms": int(total_time * 1000),
+            "audio_duration_s": audio_duration
+        }
+
+        # If audio exists, encode as base64 for browser
+        if wav_bytes:
+            import base64
+            response["audio_base64"] = base64.b64encode(wav_bytes).decode('utf-8')
+
+        return response
+
+    except Exception as e:
+        logger.error(f"❌ Error in generate_response: {e}", exc_info=True)
+        return {"error": str(e)}
 
 
 @app.get("/metrics")

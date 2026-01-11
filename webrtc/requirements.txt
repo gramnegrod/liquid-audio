@@ -1,5 +1,5 @@
 # WebRTC + Real-time communication
-fastrtc>=0.1.0
+fastrtc>=0.0.34
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 

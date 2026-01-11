@@ -409,9 +409,9 @@
 
             if (!recording) {
                 try {
-                    if (!pc) {
-                        await setupWebRTC();
-                    }
+                    // Skip WebRTC setup - use HTTP fallback mode directly
+                    log("🔴 Using HTTP mode (WebRTC not required)");
+                    updateStatus("Recording (HTTP mode)", "connected");
 
                     // Get fresh audio stream
                     const stream = await navigator.mediaDevices.getUserMedia({
@@ -461,7 +461,6 @@
                     btn.classList.add("btn-secondary");
 
                     log("🎤 Recording started...");
-                    updateStatus("Recording...", "connected");
 
                 } catch (error) {
                     log(`❌ Recording error: ${error.message}`);
@@ -495,8 +494,8 @@
                 const result = await response.json();
 
                 // Update metrics
-                if (result.ttft_ms) {
-                    document.getElementById("ttfa").textContent = Math.round(result.ttft_ms);
+                if (result.ttfa_ms) {
+                    document.getElementById("ttfa").textContent = Math.round(result.ttfa_ms);
                 }
                 if (result.total_ms) {
                     document.getElementById("total-latency").textContent = Math.round(result.total_ms);
