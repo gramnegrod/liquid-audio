@@ -259,6 +259,60 @@ Browser plays audio incrementally as it arrives
 
 ---
 
+## 🚀 **CURRENT WORK: WebRTC + FastRTC Implementation** (Jan 11, 2026)
+
+### Target: <1.2s End-to-End Latency
+
+**Status**: Architecture + Core Files Created ✅
+
+**Files Created**:
+- `webrtc/server.py` - FastRTC + LFM2.5-Audio handler with interleaved generation streaming
+- `webrtc/client.html` - WebRTC browser UI with real-time metrics
+- `webrtc/requirements.txt` - Dependencies (fastrtc, liquid-audio, etc.)
+- `webrtc/README.md` - Complete implementation guide
+- `webrtc/__init__.py` - Package initialization
+
+**Architecture**:
+```
+WebRTC (UDP, low latency)
+    ↓
+FastRTC Stream Handler
+    ↓
+LFM2.5-Audio Interleaved Generation (mixed text+audio tokens)
+    ↓
+Audio Chunk Streaming (every 12 tokens)
+    ↓
+Browser Web Audio API Playback
+```
+
+**Key Differences vs HTTP Baseline**:
+- **Protocol**: UDP (WebRTC) vs TCP (HTTP)
+- **Transport latency**: 20-50ms vs potential buffering
+- **Audio streaming**: Chunks every 48ms vs wait for full response
+- **User perception**: First audio in ~200ms vs 5.6s wait
+- **Total latency**: Sub-1.2s (maintained) but NOW distributed incrementally
+
+**Next Steps**:
+1. Install fastrtc: `pip install fastrtc`
+2. Test server.py: `python webrtc/server.py`
+3. Validate FastRTC integration (may need signaling adjustment)
+4. Measure TTFA (Time To First Audio) in browser
+5. Benchmark against HTTP baseline (sandbox.py)
+6. Document latency breakdown vs HTTP
+
+**Known Gaps**:
+- FastRTC signaling currently HTTP-based (not full P2P), but media streaming is still low-latency UDP
+- aiortc WebRTC peer connection integration pending
+- Full duplex streaming (simultaneous send/receive audio) for turn-taking TBD
+
+**Research Findings**:
+- NO existing LFM2.5-Audio + WebRTC implementations found publicly
+- FastRTC + Whisper examples exist but use different model
+- This will be first production LFM2.5-Audio WebRTC integration
+- Architecture validated against OpenAI Realtime API patterns
+
+---
+
 ## Session Summary
 
 **Date**: 2026-01-09

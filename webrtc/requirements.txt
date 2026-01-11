@@ -1,0 +1,23 @@
+# WebRTC + Real-time communication
+fastrtc>=0.1.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Audio processing
+numpy>=1.24.0
+scipy>=1.11.0
+
+# LFM2.5-Audio model
+liquid-audio>=0.1.0
+
+# PyTorch (should already be installed)
+# torch>=2.0.0
+# torchvision
+# torchaudio
+
+# WebRTC server requirements
+python-multipart>=0.0.6
+pydantic>=2.0.0
+
+# Optional: Performance monitoring
+psutil>=5.9.0

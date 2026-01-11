@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFM2.5-Audio WebRTC Chat - Low Latency</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #667eea;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+
+        .response-box {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            min-height: 80px;
+            border-left: 4px solid #667eea;
+        }
+
+        .response-label {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .response-text {
+            color: #333;
+            font-size: 14px;
+            line-height: 1.5;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .metric {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .metric-label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background: #e3f2fd;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #1976d2;
+            margin-bottom: 15px;
+        }
+
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .debug-panel {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 11px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .debug-line {
+            margin: 2px 0;
+            opacity: 0.8;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 LFM2.5-Audio WebRTC</h1>
+            <p>Low-latency speech-to-speech streaming (&lt;1.2s target)</p>
+        </div>
+
+        <div class="content">
+            <!-- Status -->
+            <div id="status" class="status">
+                <div class="status-dot"></div>
+                <span id="status-text">Connecting...</span>
+            </div>
+
+            <!-- Metrics -->
+            <div class="section">
+                <div class="section-title">📊 Metrics</div>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value" id="ttfa">-</div>
+                        <div class="metric-label">TTFA (ms)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="total-latency">-</div>
+                        <div class="metric-label">Total (ms)</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="audio-chunks">0</div>
+                        <div class="metric-label">Chunks</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="audio-duration">-</div>
+                        <div class="metric-label">Duration (s)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Response -->
+            <div class="section">
+                <div class="section-title">💬 Response Text</div>
+                <div class="response-box">
+                    <div class="response-label">Generated Response:</div>
+                    <div class="response-text" id="response-text">Waiting for audio input...</div>
+                </div>
+            </div>
+
+            <!-- Audio Player -->
+            <div class="section">
+                <div class="section-title">🔊 Audio Playback</div>
+                <audio id="audio-player" controls autoplay></audio>
+            </div>
+
+            <!-- Controls -->
+            <div class="section">
+                <div class="controls">
+                    <button class="btn-primary" id="record-btn" onclick="toggleRecording()">
+                        🔴 Start Recording
+                    </button>
+                    <button class="btn-secondary" onclick="resetUI()">Reset</button>
+                </div>
+            </div>
+
+            <!-- Debug -->
+            <div id="debug-panel" class="debug-panel"></div>
+        </div>
+    </div>
+
+    <script>
+        // FastRTC integration
+        let pc = null;
+        let stream = null;
+        let recording = false;
+        let audioContext = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+
+        const FASTRTC_ENDPOINT = "http://localhost:8000/rtc";
+        const DEBUG_LINES = [];
+        const MAX_DEBUG_LINES = 15;
+
+        function log(message, type = "info") {
+            const timestamp = new Date().toLocaleTimeString();
+            const line = `[${timestamp}] ${message}`;
+            console.log(line);
+
+            // Add to debug panel
+            DEBUG_LINES.push(line);
+            if (DEBUG_LINES.length > MAX_DEBUG_LINES) {
+                DEBUG_LINES.shift();
+            }
+            updateDebugPanel();
+        }
+
+        function updateDebugPanel() {
+            const panel = document.getElementById("debug-panel");
+            panel.innerHTML = DEBUG_LINES.map(line => `<div class="debug-line">${line}</div>`).join("");
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function updateStatus(text, type = "connecting") {
+            const status = document.getElementById("status");
+            const statusText = document.getElementById("status-text");
+
+            status.className = `status ${type}`;
+            statusText.textContent = text;
+
+            log(text, type);
+        }
+
+        async function setupWebRTC() {
+            try {
+                updateStatus("Setting up WebRTC...", "connecting");
+
+                // Create peer connection via FastRTC
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+                });
+
+                // Get user audio
+                const userStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 16000
+                    }
+                });
+
+                // Add audio track to connection
+                const audioTrack = userStream.getAudioTracks()[0];
+                pc.addTrack(audioTrack, userStream);
+
+                log("✅ Microphone access granted");
+
+                // Handle incoming audio from server
+                pc.ontrack = (event) => {
+                    log(`📥 Receiving audio from server`);
+                    const audioElement = document.getElementById("audio-player");
+                    audioElement.srcObject = event.streams[0];
+                };
+
+                // Send offer to FastRTC endpoint
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                log("📤 Sending WebRTC offer to server...");
+
+                // This would need a signaling mechanism with FastRTC
+                // For now, using simplified approach with FastRTC's HTTP-based signaling
+                const response = await fetch(`${FASTRTC_ENDPOINT}/offer`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(offer)
+                }).catch(() => {
+                    log("⚠️  Note: FastRTC endpoint not responding. Using client-side audio only.");
+                    return null;
+                });
+
+                if (response) {
+                    const answer = await response.json();
+                    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                    log("✅ WebRTC connected!");
+                    updateStatus("Connected & Ready", "connected");
+                } else {
+                    log("⚠️  Continuing with local audio capture...");
+                    updateStatus("Ready (local mode)", "connected");
+                }
+
+                // Setup audio context for visualization
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            } catch (error) {
+                log(`❌ WebRTC setup error: ${error.message}`);
+                updateStatus("Error setting up WebRTC", "error");
+                throw error;
+            }
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById("record-btn");
+
+            if (!recording) {
+                try {
+                    if (!pc) {
+                        await setupWebRTC();
+                    }
+
+                    // Get fresh audio stream
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 16000
+                        }
+                    });
+
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+                    recordedChunks = [];
+
+                    const startTime = Date.now();
+                    let firstChunkTime = null;
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            recordedChunks.push(event.data);
+
+                            if (firstChunkTime === null) {
+                                firstChunkTime = Date.now() - startTime;
+                                log(`🎵 First audio chunk captured: ${firstChunkTime}ms`);
+                            }
+                        }
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const totalRecordTime = Date.now() - startTime;
+                        log(`⏹️  Recording stopped (${totalRecordTime}ms)`);
+
+                        // Send recorded audio to server
+                        const audioBlob = new Blob(recordedChunks, { type: "audio/webm" });
+                        await sendAudioToServer(audioBlob);
+
+                        // Update UI
+                        recording = false;
+                        btn.textContent = "🔴 Start Recording";
+                        btn.classList.remove("btn-secondary");
+                        btn.classList.add("btn-primary");
+                    };
+
+                    mediaRecorder.start();
+                    recording = true;
+                    btn.textContent = "⏹️  Stop Recording";
+                    btn.classList.remove("btn-primary");
+                    btn.classList.add("btn-secondary");
+
+                    log("🎤 Recording started...");
+                    updateStatus("Recording...", "connected");
+
+                } catch (error) {
+                    log(`❌ Recording error: ${error.message}`);
+                    updateStatus("Error starting recording", "error");
+                }
+            } else {
+                mediaRecorder.stop();
+            }
+        }
+
+        async function sendAudioToServer(audioBlob) {
+            try {
+                log("📤 Sending audio to server...");
+                const startTime = Date.now();
+
+                const formData = new FormData();
+                formData.append("audio", audioBlob);
+
+                const response = await fetch("/api/generate", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const serverTime = Date.now() - startTime;
+                log(`📬 Server responded in ${serverTime}ms`);
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // Update metrics
+                if (result.ttft_ms) {
+                    document.getElementById("ttfa").textContent = Math.round(result.ttft_ms);
+                }
+                if (result.total_ms) {
+                    document.getElementById("total-latency").textContent = Math.round(result.total_ms);
+                }
+                if (result.audio_duration_s) {
+                    document.getElementById("audio-duration").textContent = result.audio_duration_s.toFixed(1);
+                }
+
+                // Display text response
+                if (result.text) {
+                    document.getElementById("response-text").textContent = result.text;
+                }
+
+                // Play audio if available
+                if (result.audio_base64) {
+                    log("🎵 Playing response audio...");
+                    const audioBytes = Uint8Array.from(atob(result.audio_base64), c => c.charCodeAt(0));
+                    const audioBlob = new Blob([audioBytes], { type: "audio/wav" });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audioPlayer = document.getElementById("audio-player");
+                    audioPlayer.src = audioUrl;
+                    audioPlayer.play();
+                }
+
+                updateStatus("Response received!", "connected");
+
+            } catch (error) {
+                log(`❌ Error sending audio: ${error.message}`);
+                updateStatus("Error communicating with server", "error");
+            }
+        }
+
+        function resetUI() {
+            document.getElementById("response-text").textContent = "Waiting for audio input...";
+            document.getElementById("ttfa").textContent = "-";
+            document.getElementById("total-latency").textContent = "-";
+            document.getElementById("audio-chunks").textContent = "0";
+            document.getElementById("audio-duration").textContent = "-";
+            document.getElementById("audio-player").src = "";
+            DEBUG_LINES.length = 0;
+            updateDebugPanel();
+            log("🔄 UI reset");
+        }
+
+        // Initialize on load
+        window.addEventListener("load", () => {
+            log("🚀 LFM2.5-Audio WebRTC Client loaded");
+            log("📍 FastRTC endpoint: " + FASTRTC_ENDPOINT);
+            updateStatus("Ready to connect", "connected");
+        });
+    </script>
+</body>
+</html>
