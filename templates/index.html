@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFM2.5-Audio Parameter Sandbox</title>
+    <style>
+        :root {
+            --color-primary: #2563eb;
+            --color-primary-dark: #1e40af;
+            --color-bg: #ffffff;
+            --color-bg-alt: #f9fafb;
+            --color-text: #111827;
+            --color-text-light: #6b7280;
+            --color-border: #e5e7eb;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --spacing-xs: 2px;
+            --spacing-sm: 4px;
+            --spacing-md: 8px;
+            --spacing-lg: 12px;
+            --spacing-xl: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+                Ubuntu, Cantarell, sans-serif;
+            background-color: var(--color-bg-alt);
+            color: var(--color-text);
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+            color: white;
+            padding: var(--spacing-md) var(--spacing-lg);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 0;
+        }
+
+        header p {
+            font-size: 12px;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 8px auto;
+            padding: 0 var(--spacing-md);
+            gap: var(--spacing-md);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: calc(100vh - 100px);
+        }
+
+        section {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid var(--color-border);
+            padding: var(--spacing-md);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            overflow-y: auto;
+            font-size: 13px;
+        }
+
+        section > h2 {
+            font-size: 16px;
+            margin-bottom: var(--spacing-sm);
+            color: var(--color-primary);
+            border-bottom: 2px solid var(--color-primary);
+            padding-bottom: var(--spacing-xs);
+        }
+
+        /* Controls Section */
+        .controls {
+            grid-column: 1;
+            grid-row: 1 / 3;
+        }
+
+        .control-group {
+            margin-bottom: var(--spacing-md);
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: var(--spacing-xs);
+            font-size: 13px;
+        }
+
+        .slider-container {
+            display: flex;
+            gap: var(--spacing-md);
+            align-items: center;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--color-border);
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--color-primary);
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--color-primary);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .slider-value {
+            min-width: 60px;
+            text-align: right;
+            font-weight: 600;
+            color: var(--color-primary);
+            font-size: 14px;
+        }
+
+        /* Radio buttons for mode */
+        .mode-selector {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        input[type="radio"] {
+            cursor: pointer;
+            accent-color: var(--color-primary);
+        }
+
+        /* Preset buttons */
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-xs);
+        }
+
+        button.preset {
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border: 1px solid var(--color-border);
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        button.preset:hover {
+            background: var(--color-bg-alt);
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        button.preset.active {
+            background: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        /* System prompt */
+        .prompt-selector {
+            margin-bottom: var(--spacing-sm);
+        }
+
+        select, textarea {
+            width: 100%;
+            padding: var(--spacing-xs);
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 12px;
+            resize: vertical;
+        }
+
+        select:focus, textarea:focus, input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        /* I/O Section */
+        .io {
+            grid-column: 2;
+            grid-row: 1;
+        }
+
+        .audio-controls {
+            display: flex;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        button {
+            padding: var(--spacing-sm) var(--spacing-md);
+            border: none;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        button.primary {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        button.primary:hover:not(:disabled) {
+            background: var(--color-primary-dark);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        button.secondary {
+            background: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            color: var(--color-text);
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background: var(--color-border);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: var(--spacing-sm);
+            background: var(--color-bg-alt);
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .status.listening {
+            color: var(--color-warning);
+        }
+
+        .status.processing {
+            color: var(--color-primary);
+        }
+
+        .status.done {
+            color: var(--color-success);
+        }
+
+        .status.error {
+            color: var(--color-error);
+        }
+
+        audio {
+            width: 100%;
+            margin-top: var(--spacing-md);
+        }
+
+        /* Metrics Section */
+        .metrics {
+            grid-column: 2;
+            grid-row: 2;
+        }
+
+        .metric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-sm);
+            background: var(--color-bg-alt);
+            border-radius: 4px;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .metric-item label {
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .metric-value {
+            font-size: 16px;
+            font-weight: 700;
+            min-width: 80px;
+            text-align: right;
+        }
+
+        .metric-value.fast {
+            color: var(--color-success);
+        }
+
+        .metric-value.medium {
+            color: var(--color-warning);
+        }
+
+        .metric-value.slow {
+            color: var(--color-error);
+        }
+
+        /* Star rating */
+        .rating {
+            display: flex;
+            gap: var(--spacing-xs);
+            margin: var(--spacing-sm) 0;
+        }
+
+        .star {
+            font-size: 20px;
+            cursor: pointer;
+            opacity: 0.3;
+            transition: opacity 0.2s;
+        }
+
+        .star:hover, .star.active {
+            opacity: 1;
+            color: #fbbf24;
+        }
+
+        /* CSV Download */
+        .csv-section {
+            margin-top: var(--spacing-sm);
+            padding-top: var(--spacing-sm);
+            border-top: 1px solid var(--color-border);
+        }
+
+        .stats {
+            font-size: 12px;
+            color: var(--color-text-light);
+            margin-top: var(--spacing-sm);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                grid-column: 1;
+                grid-row: 1;
+            }
+
+            .io {
+                grid-column: 1;
+                grid-row: 2;
+            }
+
+            .metrics {
+                grid-column: 1;
+                grid-row: 3;
+            }
+        }
+
+        @media (max-width: 768px) {
+            main {
+                margin: var(--spacing-md);
+            }
+
+            section {
+                padding: var(--spacing-md);
+            }
+
+            .preset-buttons {
+                grid-template-columns: 1fr;
+            }
+
+            .audio-controls {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🎵 LFM2.5-Audio Parameter Sandbox</h1>
+        <p>Systematic latency exploration & parameter testing</p>
+    </header>
+
+    <main>
+        <!-- CONTROLS -->
+        <section class="controls">
+            <h2>⚙️ Parameters</h2>
+
+            <!-- Mode Selection (Interleaved only for speech-to-speech) -->
+            <div class="control-group">
+                <label>Generation Mode:</label>
+                <div class="mode-selector">
+                    <label class="radio-label">
+                        <input type="radio" id="mode-interleaved" name="mode"
+                            value="interleaved" checked>
+                        <span>Interleaved (Real-time Speech-to-Speech)</span>
+                    </label>
+                    <label class="radio-label" style="display: none;">
+                        <input type="radio" id="mode-sequential" name="mode"
+                            value="sequential">
+                        <span>Sequential (ASR/TTS only - not for conversation)</span>
+                    </label>
+                </div>
+                <p style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                    ℹ️ Interleaved mode for conversational speech-to-speech. Sequential mode is for ASR (speech→text) or TTS (text→speech) tasks only.
+                </p>
+            </div>
+
+            <!-- Presets -->
+            <div class="control-group">
+                <label>Quick Presets:</label>
+                <div class="preset-buttons">
+                    <button class="preset" onclick="applyPreset('sub_second')" style="background: linear-gradient(135deg, #ff1744, #d32f2f); font-weight: bold;">
+                        ⚡⚡ Sub-Second (800ms)
+                    </button>
+                    <button class="preset" onclick="applyPreset('ultra_fast')" style="background: linear-gradient(135deg, #ff6b6b, #ee5a6f);">
+                        🚀 Ultra Fast (2.8s)
+                    </button>
+                    <button class="preset" onclick="applyPreset('low_latency')">
+                        ⚡ Low Latency
+                    </button>
+                    <button class="preset" onclick="applyPreset('balanced')">
+                        ⚖️ Balanced
+                    </button>
+                    <button class="preset" onclick="applyPreset('high_quality')">
+                        ✨ High Quality
+                    </button>
+                    <button class="preset" onclick="applyPreset('creative')">
+                        🎨 Creative
+                    </button>
+                </div>
+            </div>
+
+            <!-- Max Tokens -->
+            <div class="control-group">
+                <label>Max Tokens (32-1024):</label>
+                <div class="slider-container">
+                    <input type="range" id="max-tokens" min="32" max="1024"
+                        value="512" oninput="onSliderChange('max_new_tokens', this)">
+                    <span class="slider-value" id="max-tokens-value">512</span>
+                </div>
+            </div>
+
+            <!-- Text Temperature -->
+            <div class="control-group">
+                <label>Text Temperature (0-2):</label>
+                <div class="slider-container">
+                    <input type="range" id="text-temp" min="0" max="2" step="0.1"
+                        value="1.0" oninput="onSliderChange('text_temperature', this)">
+                    <span class="slider-value" id="text-temp-value">1.0</span>
+                </div>
+            </div>
+
+            <!-- Text Top K -->
+            <div class="control-group">
+                <label>Text Top K (1-100):</label>
+                <div class="slider-container">
+                    <input type="range" id="text-topk" min="1" max="100"
+                        value="4" oninput="onSliderChange('text_top_k', this)">
+                    <span class="slider-value" id="text-topk-value">4</span>
+                </div>
+            </div>
+
+            <!-- Audio Temperature -->
+            <div class="control-group">
+                <label>Audio Temperature (0-2):</label>
+                <div class="slider-container">
+                    <input type="range" id="audio-temp" min="0" max="2" step="0.1"
+                        value="1.0" oninput="onSliderChange('audio_temperature', this)">
+                    <span class="slider-value" id="audio-temp-value">1.0</span>
+                </div>
+            </div>
+
+            <!-- Audio Top K -->
+            <div class="control-group">
+                <label>Audio Top K (1-50):</label>
+                <div class="slider-container">
+                    <input type="range" id="audio-topk" min="1" max="50"
+                        value="4" oninput="onSliderChange('audio_top_k', this)">
+                    <span class="slider-value" id="audio-topk-value">4</span>
+                </div>
+            </div>
+
+            <!-- System Prompt -->
+            <div class="control-group">
+                <label>System Prompt:</label>
+                <div class="prompt-selector">
+                    <select id="prompt-preset" onchange="updatePromptText()">
+                        <option value="interleaved">
+                            Respond with interleaved text and audio.
+                        </option>
+                        <option value="brief">Respond briefly with audio.</option>
+                        <option value="asr">Perform ASR.</option>
+                        <option value="tts_uk_female">
+                            Perform TTS. Use the UK female voice.
+                        </option>
+                        <option value="tts_us_male">
+                            Perform TTS. Use the US male voice.
+                        </option>
+                        <option value="tts_us_female">
+                            Perform TTS. Use the US female voice.
+                        </option>
+                        <option value="tts_uk_male">
+                            Perform TTS. Use the UK male voice.
+                        </option>
+                    </select>
+                </div>
+                <textarea id="prompt-text" placeholder="Custom system prompt..."
+                    rows="4" onchange="applySystemPrompt()"
+                    style="margin-top: var(--spacing-sm);"></textarea>
+                <button class="secondary" style="width: 100%; margin-top: var(--spacing-sm);"
+                    onclick="applySystemPrompt()">Apply Prompt</button>
+            </div>
+
+            <button class="secondary" style="width: 100%; margin-top: var(--spacing-lg);"
+                onclick="resetConversation()">🔄 Reset Conversation</button>
+        </section>
+
+        <!-- AUDIO I/O -->
+        <section class="io">
+            <h2>🎤 Audio I/O</h2>
+
+            <!-- Input Mode Selection -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-weight: 600; margin-bottom: 8px;">Input Mode:</label>
+                <div style="display: flex; gap: 16px;">
+                    <label class="radio-label">
+                        <input type="radio" id="mode-ptt" name="input_mode" value="ptt" checked
+                            onchange="switchInputMode('ptt')">
+                        <span>🎯 Push-to-Talk (PTT) - Manual start/stop</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" id="mode-vad" name="input_mode" value="vad"
+                            onchange="switchInputMode('vad')">
+                        <span>🎙️ Voice Activity Detection (VAD) - Auto-detect pause</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="audio-controls">
+                <button id="record-btn" class="primary" onclick="startRecording()">
+                    🎤 Start Recording
+                </button>
+                <button id="stop-btn" class="secondary" onclick="stopRecording()" disabled>
+                    ⏹️ Stop
+                </button>
+            </div>
+
+            <div id="status" class="status">Ready</div>
+
+            <label>Response Audio:</label>
+            <audio id="response-audio" controls></audio>
+        </section>
+
+        <!-- METRICS -->
+        <section class="metrics">
+            <h2>📊 Metrics</h2>
+
+            <div class="metric-item">
+                <label>TTFT (Time to 1st Token):</label>
+                <span class="metric-value" id="ttft-value">—</span>
+            </div>
+
+            <div class="metric-item">
+                <label>Total Latency:</label>
+                <span class="metric-value" id="total-value">—</span>
+            </div>
+
+            <div class="metric-item">
+                <label>Audio Duration:</label>
+                <span class="metric-value" id="audio-value">—</span>
+            </div>
+
+            <!-- Generated Text Output -->
+            <div class="metric-item">
+                <label>Generated Text:</label>
+                <div id="text-value" style="padding: 8px; background: #f3f4f6; border-radius: 4px; min-height: 40px; border: 1px solid #d1d5db; white-space: pre-wrap; word-break: break-word;">—</div>
+            </div>
+
+            <!-- Quality Rating -->
+            <div class="control-group">
+                <label>Rate Quality:</label>
+                <div class="rating" id="rating-container">
+                    <span class="star" onclick="setRating(1)">★</span>
+                    <span class="star" onclick="setRating(2)">★</span>
+                    <span class="star" onclick="setRating(3)">★</span>
+                    <span class="star" onclick="setRating(4)">★</span>
+                    <span class="star" onclick="setRating(5)">★</span>
+                </div>
+            </div>
+
+            <!-- CSV Download & Stats -->
+            <div class="csv-section">
+                <button class="secondary" style="width: 100%;" onclick="downloadCSV()">
+                    📥 Download CSV
+                </button>
+                <div class="stats" id="stats">
+                    Runs: 0 | Avg TTFT: — | Avg Total: —
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Socket.IO client for WebSocket streaming -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <script>
+        // ================================================================
+        // STATE & CONSTANTS
+        // ================================================================
+
+        const SYSTEM_PROMPTS = {
+            interleaved: "Respond with interleaved text and audio.",
+            brief: "Respond briefly with audio.",
+            asr: "Perform ASR.",
+            tts_uk_female: "Perform TTS. Use the UK female voice.",
+            tts_us_male: "Perform TTS. Use the US male voice.",
+            tts_us_female: "Perform TTS. Use the US female voice.",
+            tts_uk_male: "Perform TTS. Use the UK male voice.",
+        };
+
+        const PRESET_SETTINGS = {
+            low_latency: {
+                max_new_tokens: 256,
+                text_temperature: 0.5,
+                text_top_k: 1,
+                audio_temperature: 0.5,
+                audio_top_k: 1,
+            },
+            balanced: {
+                max_new_tokens: 512,
+                text_temperature: 1.0,
+                text_top_k: 4,
+                audio_temperature: 1.0,
+                audio_top_k: 4,
+            },
+            high_quality: {
+                max_new_tokens: 512,
+                text_temperature: 1.0,
+                text_top_k: 10,
+                audio_temperature: 1.0,
+                audio_top_k: 10,
+            },
+            creative: {
+                max_new_tokens: 512,
+                text_temperature: 1.5,
+                text_top_k: 40,
+                audio_temperature: 1.5,
+                audio_top_k: 40,
+            },
+        };
+
+        // ================================================================
+        // WEBSOCKET STREAMING VARIABLES
+        // ================================================================
+
+        let ws = null;  // WebSocket connection
+        let audioBufferQueue = [];  // Queue of PCM chunks to play for streaming
+        let isAudioPlayingStreaming = false;  // Streaming playback state
+        let streamingScriptProcessor = null;  // ScriptProcessorNode for streaming playback
+
+        // ================================================================
+        // SLIDER HANDLING
+        // ================================================================
+
+        function onSliderChange(paramName, element) {
+            const value = element.type === 'range'
+                ? (paramName.includes('token') ? parseInt(element.value) : parseFloat(element.value))
+                : element.value;
+
+            // Update display
+            const valueSpan = document.getElementById(`${element.id}-value`);
+            if (valueSpan) {
+                valueSpan.textContent = value;
+            }
+
+            // Save to localStorage
+            const settings = JSON.parse(localStorage.getItem('settings') || '{}');
+            settings[paramName] = value;
+            localStorage.setItem('settings', JSON.stringify(settings));
+
+            // Send to backend
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [paramName]: value }),
+            }).catch(err => console.error('Error updating settings:', err));
+        }
+
+        // ================================================================
+        // PRESET HANDLING
+        // ================================================================
+
+        async function applyPreset(name) {
+            try {
+                const response = await fetch(`/api/preset/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    updateAllSliders(data.settings);
+                    updatePresetButtons(name);
+                    console.log(`Applied preset: ${name}`);
+                } else {
+                    alert('Error applying preset: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error applying preset:', error);
+                alert('Error applying preset');
+            }
+        }
+
+        function updateAllSliders(settings) {
+            if (settings.max_new_tokens !== undefined) {
+                document.getElementById('max-tokens').value = settings.max_new_tokens;
+                document.getElementById('max-tokens-value').textContent = settings.max_new_tokens;
+            }
+            if (settings.text_temperature !== undefined) {
+                document.getElementById('text-temp').value = settings.text_temperature;
+                document.getElementById('text-temp-value').textContent = settings.text_temperature;
+            }
+            if (settings.text_top_k !== undefined) {
+                document.getElementById('text-topk').value = settings.text_top_k;
+                document.getElementById('text-topk-value').textContent = settings.text_top_k;
+            }
+            if (settings.audio_temperature !== undefined) {
+                document.getElementById('audio-temp').value = settings.audio_temperature;
+                document.getElementById('audio-temp-value').textContent = settings.audio_temperature;
+            }
+            if (settings.audio_top_k !== undefined) {
+                document.getElementById('audio-topk').value = settings.audio_top_k;
+                document.getElementById('audio-topk-value').textContent = settings.audio_top_k;
+            }
+            if (settings.mode !== undefined) {
+                document.querySelector(`input[name="mode"][value="${settings.mode}"]`).checked = true;
+            }
+        }
+
+        function updatePresetButtons(active) {
+            document.querySelectorAll('button.preset').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (active) {
+                const activeBtn = Array.from(document.querySelectorAll('button.preset')).find(btn =>
+                    btn.textContent.toLowerCase().includes(active.replace('_', ' '))
+                );
+                if (activeBtn) activeBtn.classList.add('active');
+            }
+        }
+
+        // ================================================================
+        // SYSTEM PROMPT HANDLING
+        // ================================================================
+
+        function updatePromptText() {
+            const preset = document.getElementById('prompt-preset').value;
+            const textArea = document.getElementById('prompt-text');
+            textArea.value = SYSTEM_PROMPTS[preset] || '';
+        }
+
+        async function applySystemPrompt() {
+            const prompt = document.getElementById('prompt-text').value.trim();
+            if (!prompt) {
+                alert('Prompt cannot be empty');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/system-prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt }),
+                });
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    console.log('System prompt updated:', data.prompt);
+                } else {
+                    alert('Error updating prompt: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error updating prompt:', error);
+                alert('Error updating prompt');
+            }
+        }
+
+        // ================================================================
+        // RECORDING & AUDIO
+        // ================================================================
+
+        let audioContext = null;
+        let mediaStream = null;
+        let audioProcessor = null;
+        let mediaRecorder = null;
+        let recordedSamples = [];
+        let sampleRate = 0;
+
+        // VAD (Voice Activity Detection) settings
+        let inputMode = 'ptt'; // 'ptt' or 'vad'
+        let analyser = null;
+        let silenceThreshold = 30; // dB level threshold
+        let silenceDuration = 1500; // ms of silence to trigger stop
+        let silenceTimer = null;
+        let isRecordingInVAD = false;
+
+        // WAV encoder helper
+        function encodeWAV(samples, sampleRate) {
+            const bytesPerSample = 2; // 16-bit
+            const blockAlign = 1 * bytesPerSample;
+            const numFrames = samples.length;
+            const subChunk2Size = numFrames * blockAlign;
+            const mainChunkSize = 36 + subChunk2Size;
+
+            const buffer = new ArrayBuffer(44 + subChunk2Size);
+            const view = new DataView(buffer);
+
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, mainChunkSize, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true); // fmt chunk size
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, 1, true); // mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, 16, true); // bits per sample
+            writeString(36, 'data');
+            view.setUint32(40, subChunk2Size, true);
+
+            // Convert float32 to int16
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++) {
+                let sample = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+                offset += 2;
+            }
+
+            return buffer;
+        }
+
+        // Input mode switching
+        function switchInputMode(mode) {
+            inputMode = mode;
+            console.log(`Switched to ${mode.toUpperCase()} mode`);
+            const modeLabel = mode === 'ptt' ? 'Push-to-Talk (PTT)' : 'Voice Activity Detection (VAD)';
+            setStatus(`Ready - ${modeLabel}`, 'ready');
+        }
+
+        // VAD detection: Monitor audio levels and auto-stop on silence
+        function startVADMonitoring() {
+            if (!analyser || inputMode !== 'vad') return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const checkSilence = () => {
+                analyser.getByteFrequencyData(dataArray);
+                const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                const dB = 20 * Math.log10(average / 255);
+
+                if (dB < silenceThreshold) {
+                    // Silence detected
+                    if (!silenceTimer) {
+                        silenceTimer = setTimeout(() => {
+                            if (isRecordingInVAD && inputMode === 'vad') {
+                                console.log('VAD: Silence detected, stopping recording');
+                                stopRecording();
+                                silenceTimer = null;
+                            }
+                        }, silenceDuration);
+                    }
+                } else {
+                    // Sound detected, reset timer
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+                }
+
+                if (isRecordingInVAD) {
+                    requestAnimationFrame(checkSilence);
+                }
+            };
+
+            checkSilence();
+        }
+
+        async function startRecording() {
+            try {
+                setStatus('Requesting mic permission...', 'listening');
+
+                // Get microphone access
+                if (!mediaStream) {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                        },
+                    });
+                }
+
+                // Set up analyser for VAD if needed
+                if (inputMode === 'vad') {
+                    if (!audioContext) {
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    const source = audioContext.createMediaStreamSource(mediaStream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    source.connect(analyser);
+                    isRecordingInVAD = true;
+                }
+
+                // Use MediaRecorder (modern API)
+                recordedChunks = [];
+                mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) recordedChunks.push(e.data);
+                };
+
+                mediaRecorder.start();
+                const modeLabel = inputMode === 'ptt' ? 'PTT' : 'VAD (auto-stop on silence)';
+                setStatus(`🎤 Recording (${modeLabel})... Speak now!`, 'listening');
+                document.getElementById('record-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = inputMode === 'vad'; // PTT can stop manually, VAD auto-stops
+                console.log(`Recording started in ${inputMode.toUpperCase()} mode`);
+
+                // Start VAD monitoring if in VAD mode
+                if (inputMode === 'vad') {
+                    startVADMonitoring();
+                }
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                setStatus('Error: Cannot access microphone', 'error');
+            }
+        }
+
+        async function stopRecording() {
+            if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+                console.warn('No active recording');
+                return;
+            }
+
+            // Clean up VAD state
+            isRecordingInVAD = false;
+            if (silenceTimer) {
+                clearTimeout(silenceTimer);
+                silenceTimer = null;
+            }
+
+            // Stop the mediaRecorder and wait for it to finish
+            mediaRecorder.stop();
+
+            // Wait for the ondataavailable event to complete
+            await new Promise((resolve) => {
+                mediaRecorder.onstop = resolve;
+            });
+
+            document.getElementById('record-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+
+            setStatus('Processing audio...', 'processing');
+
+            // Create blob from recorded chunks
+            const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+            console.log(`Recorded: ${recordedChunks.length} chunks, ${audioBlob.size} bytes`);
+
+            // Send to backend (let backend handle webm/wav conversion)
+            await sendAudioToBackend(audioBlob, 48000);
+        }
+
+        // ================================================================
+        // WEBSOCKET STREAMING SETUP
+        // ================================================================
+
+        function setupWebSocket() {
+            if (!ws) {
+                ws = io();  // Socket.IO auto-connects to current host
+
+                ws.on('connect', () => {
+                    console.log('✓ WebSocket connected');
+                });
+
+                ws.on('disconnect', () => {
+                    console.log('✗ WebSocket disconnected');
+                    ws = null;
+                });
+
+                // Event listeners for streaming events
+                ws.on('ttft', (data) => {
+                    console.log(`[TTFT] ${data.ttft_ms}ms`);
+                    document.getElementById('ttft-value').textContent = Math.round(data.ttft_ms) + 'ms';
+                });
+
+                ws.on('token', (data) => {
+                    if (data.type === 'text') {
+                        const textDiv = document.getElementById('text-value');
+                        textDiv.textContent += data.text;
+                    }
+                });
+
+                ws.on('audio_chunk', (data) => {
+                    // Decode hex to Int16Array
+                    const pcmHex = data.pcm_int16;
+                    const pcmBytes = new Uint8Array(pcmHex.length / 2);
+                    for (let i = 0; i < pcmHex.length; i += 2) {
+                        pcmBytes[i / 2] = parseInt(pcmHex.substr(i, 2), 16);
+                    }
+                    const pcmInt16 = new Int16Array(pcmBytes.buffer);
+
+                    // Collect all chunks into single array
+                    audioBufferQueue.push(...pcmInt16);
+
+                    console.log(`[Audio] ${data.num_samples} samples (total: ${audioBufferQueue.length})`);
+                });
+
+                ws.on('final_metrics', (data) => {
+                    console.log(`[Final] Total: ${data.total_ms}ms, Audio: ${data.audio_duration_s.toFixed(2)}s`);
+                    document.getElementById('total-value').textContent = Math.round(data.total_ms) + 'ms';
+                    document.getElementById('audio-value').textContent = data.audio_duration_s.toFixed(1) + 's';
+
+                    // Play collected audio samples if any
+                    if (audioBufferQueue.length > 0) {
+                        console.log(`[Playback] Playing ${audioBufferQueue.length} PCM samples (24kHz)`);
+                        const int16Array = new Int16Array(audioBufferQueue);
+                        const wavBlob = createWAVFromPCM(int16Array, 24000);
+                        playAudioBlob(wavBlob);
+                    }
+
+                    setStatus('✅ Complete!', 'done');
+                });
+
+                ws.on('error', (data) => {
+                    console.error('WebSocket error:', data.message);
+                    setStatus(`Error: ${data.message}`, 'error');
+                });
+            }
+        }
+
+        function createWAVFromPCM(pcmInt16Array, sampleRate) {
+            const channels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * channels * bitsPerSample / 8;
+            const blockAlign = channels * bitsPerSample / 8;
+            const dataLength = pcmInt16Array.length * 2;
+
+            const arrayBuffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(arrayBuffer);
+
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);  // PCM
+            view.setUint16(22, channels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true);
+
+            // Copy PCM data
+            let offset = 44;
+            for (let i = 0; i < pcmInt16Array.length; i++) {
+                view.setInt16(offset, pcmInt16Array[i], true);
+                offset += 2;
+            }
+
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+
+        function playAudioBlob(blob) {
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio();
+            audio.src = url;
+            audio.play().catch(err => {
+                console.error('Error playing audio:', err);
+                setStatus(`Error: Could not play audio - ${err.message}`, 'error');
+            });
+        }
+
+        async function sendAudioToBackend(audioBlob, sampleRate) {
+            try {
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'audio.wav');
+                formData.append('sample_rate', sampleRate.toString());
+
+                setStatus('⏳ Processing...', 'processing');
+
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    console.log('Generation successful:', data);
+
+                    // Update metrics
+                    updateMetrics(data);
+
+                    // Play audio if present
+                    if (data.audio_base64) {
+                        playAudioResponse(data.audio_base64, data.audio_shape);
+                    } else {
+                        console.warn('No audio in response');
+                        setStatus('Done! (No audio generated)', 'done');
+                    }
+                } else {
+                    setStatus(`Error: ${data.message}`, 'error');
+                    console.error('Backend error:', data.message);
+                }
+            } catch (error) {
+                console.error('Error sending audio:', error);
+                setStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function encodeWAV(pcmData, sampleRate = 24000) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+            const blockAlign = numChannels * (bitsPerSample / 8);
+
+            // Create WAV file (RIFF header + fmt chunk + data chunk)
+            const headerSize = 44;
+            const wavSize = pcmData.length * 2 + 36;
+            const wavHeader = new ArrayBuffer(headerSize);
+            const view = new DataView(wavHeader);
+
+            // "RIFF" chunk descriptor
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, wavSize, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeString(36, 'data');
+            view.setUint32(40, pcmData.length * 2, true);
+
+            return new Blob([wavHeader, pcmData.buffer], { type: 'audio/wav' });
+        }
+
+        function playAudioResponse(audioBase64, audioShape) {
+            try {
+                // Decode base64 to int16 array
+                const binaryString = atob(audioBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Convert bytes to int16 array
+                const int16Array = new Int16Array(bytes.buffer);
+
+                // Create proper WAV file
+                const audioBlob = encodeWAV(int16Array, 24000);
+                const audioUrl = URL.createObjectURL(audioBlob);
+
+                // Play audio
+                const audioElement = document.getElementById('response-audio');
+                audioElement.src = audioUrl;
+                audioElement.play().catch(err => {
+                    console.error('Error playing audio:', err);
+                });
+
+                console.log('Playing audio response');
+            } catch (error) {
+                console.error('Error playing audio:', error);
+                setStatus(`Error playing audio: ${error.message}`, 'error');
+            }
+        }
+
+        function setStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        // ================================================================
+        // METRICS DISPLAY
+        // ================================================================
+
+        function updateMetrics(metrics) {
+            // TTFT
+            const ttftSpan = document.getElementById('ttft-value');
+            if (metrics.ttft_ms !== null) {
+                ttftSpan.textContent = Math.round(metrics.ttft_ms) + 'ms';
+                ttftSpan.className = 'metric-value ' + getSpeedClass(metrics.ttft_ms);
+            }
+
+            // Total latency
+            const totalSpan = document.getElementById('total-value');
+            if (metrics.total_ms !== null) {
+                totalSpan.textContent = Math.round(metrics.total_ms) + 'ms';
+                totalSpan.className = 'metric-value ' + getSpeedClass(metrics.total_ms);
+            }
+
+            // Audio duration
+            const audioSpan = document.getElementById('audio-value');
+            if (metrics.audio_duration_s !== null) {
+                audioSpan.textContent = metrics.audio_duration_s.toFixed(1) + 's';
+            }
+
+            // Generated text
+            const textDiv = document.getElementById('text-value');
+            if (metrics.text) {
+                textDiv.textContent = metrics.text;
+            } else {
+                textDiv.textContent = '—';
+            }
+
+            setStatus('Done!', 'done');
+        }
+
+        function getSpeedClass(ms) {
+            if (ms < 500) return 'fast';
+            if (ms < 1000) return 'medium';
+            return 'slow';
+        }
+
+        // ================================================================
+        // QUALITY RATING
+        // ================================================================
+
+        function setRating(rating) {
+            const stars = document.querySelectorAll('.star');
+            stars.forEach((star, idx) => {
+                if (idx < rating) {
+                    star.classList.add('active');
+                } else {
+                    star.classList.remove('active');
+                }
+            });
+
+            // Send to backend
+            fetch('/api/rate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rating }),
+            }).catch(err => console.error('Error rating:', err));
+        }
+
+        // ================================================================
+        // CSV DOWNLOAD
+        // ================================================================
+
+        async function downloadCSV() {
+            try {
+                const response = await fetch('/api/log');
+                const csv = await response.text();
+
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'experiment_log.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Error downloading CSV:', error);
+                alert('Error downloading CSV');
+            }
+        }
+
+        // ================================================================
+        // CONVERSATION CONTROL
+        // ================================================================
+
+        async function resetConversation() {
+            if (!confirm('Clear conversation history?')) return;
+
+            try {
+                const response = await fetch('/api/reset', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    console.log('Conversation reset');
+                    clearMetrics();
+                }
+            } catch (error) {
+                console.error('Error resetting conversation:', error);
+            }
+        }
+
+        function clearMetrics() {
+            document.getElementById('ttft-value').textContent = '—';
+            document.getElementById('total-value').textContent = '—';
+            document.getElementById('audio-value').textContent = '—';
+            document.getElementById('response-audio').src = '';
+            document.querySelectorAll('.star').forEach(s => s.classList.remove('active'));
+        }
+
+        // ================================================================
+        // INITIALIZATION
+        // ================================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Restore settings from localStorage
+            const saved = JSON.parse(localStorage.getItem('settings') || '{}');
+            if (Object.keys(saved).length > 0) {
+                updateAllSliders(saved);
+            }
+
+            // Initialize system prompt
+            updatePromptText();
+
+            // Set initial status
+            setStatus('Ready', '');
+
+            console.log('LFM2.5-Audio Parameter Sandbox loaded');
+        });
+
+        // Mode selection
+        document.addEventListener('change', (e) => {
+            if (e.target.name === 'mode') {
+                onSliderChange('mode', { value: e.target.value });
+            }
+        });
+    </script>
+</body>
+</html>

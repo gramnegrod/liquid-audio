@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFM2.5-Audio Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+            max-height: 700px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+
+        header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .presets {
+            display: flex;
+            gap: 8px;
+            padding: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button.preset {
+            padding: 8px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button.preset:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        button.preset.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message-box {
+            background: #f9fafb;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            line-height: 1.6;
+            min-height: 100px;
+        }
+
+        .message-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .message-text {
+            color: #333;
+            font-size: 14px;
+        }
+
+        .audio-player {
+            background: #f9fafb;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        audio {
+            width: 100%;
+            height: 30px;
+        }
+
+        .metrics {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+        }
+
+        .metric {
+            text-align: center;
+        }
+
+        .metric-label {
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .metric-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            padding: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        button.action {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button.start-recording {
+            background: #10b981;
+            color: white;
+        }
+
+        button.start-recording:hover:not(:disabled) {
+            background: #059669;
+        }
+
+        button.stop-recording {
+            background: #ef4444;
+            color: white;
+        }
+
+        button.stop-recording:hover:not(:disabled) {
+            background: #dc2626;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+            padding: 4px;
+            min-height: 18px;
+        }
+
+        .status.processing {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+
+        .status.error {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .status.success {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        #debug {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: #000;
+            color: #0f0;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: monospace;
+            max-width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 9999;
+            display: none;
+        }
+
+        #debug.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎤 LFM2.5-Audio Chat</h1>
+            <p>Speech-to-speech conversation with low-latency audio</p>
+        </header>
+
+        <div class="presets">
+            <button class="preset active" data-preset="low_latency">⚡ Low Latency</button>
+            <button class="preset" data-preset="balanced">⚖️ Balanced</button>
+            <button class="preset" data-preset="high_quality">✨ High Quality</button>
+            <button class="preset" data-preset="creative">🎨 Creative</button>
+        </div>
+
+        <div class="chat-area">
+            <div class="message-box">
+                <div class="message-label">Generated Response</div>
+                <div class="message-text" id="response-text">Ready to listen... Click "Start Recording" to begin.</div>
+            </div>
+
+            <div class="audio-player">
+                <div class="message-label">Audio Response</div>
+                <audio id="audio-player" controls></audio>
+            </div>
+
+            <div class="metrics">
+                <div class="metric">
+                    <div class="metric-label">TTFT</div>
+                    <div class="metric-value" id="ttft">—</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Duration</div>
+                    <div class="metric-value" id="duration">—</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Total Time</div>
+                    <div class="metric-value" id="total-time">—</div>
+                </div>
+            </div>
+
+            <div class="status" id="status-message"></div>
+        </div>
+
+        <div class="controls">
+            <button class="action start-recording" id="start-btn" onclick="startRecording()">
+                🎤 Start Recording
+            </button>
+            <button class="action stop-recording" id="stop-btn" onclick="stopRecording()" disabled>
+                ⏹️ Stop
+            </button>
+        </div>
+    </div>
+
+    <div id="debug"></div>
+
+    <script>
+        function addDebug(msg) {
+            const debug = document.getElementById('debug');
+            debug.classList.add('show');
+            debug.innerHTML += msg + '<br>';
+            debug.scrollTop = debug.scrollHeight;
+        }
+    </script>
+
+    <script>
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let currentPreset = 'low_latency';
+
+        // Create a WAV file from raw PCM samples
+        function createWavFile(audioBytes, numSamples, sampleRate, channels) {
+            const byteRate = sampleRate * channels * 2; // 2 bytes per sample (16-bit)
+            const blockAlign = channels * 2;
+            const dataSize = numSamples * channels * 2;
+
+            // Create WAV header
+            const wavHeader = new ArrayBuffer(44);
+            const view = new DataView(wavHeader);
+
+            // "RIFF" chunk descriptor
+            view.setUint8(0, 'R'.charCodeAt(0));
+            view.setUint8(1, 'I'.charCodeAt(0));
+            view.setUint8(2, 'F'.charCodeAt(0));
+            view.setUint8(3, 'F'.charCodeAt(0));
+
+            // File size - 8 (excluding RIFF header)
+            view.setUint32(4, 36 + dataSize, true);
+
+            // "WAVE" format
+            view.setUint8(8, 'W'.charCodeAt(0));
+            view.setUint8(9, 'A'.charCodeAt(0));
+            view.setUint8(10, 'V'.charCodeAt(0));
+            view.setUint8(11, 'E'.charCodeAt(0));
+
+            // "fmt " subchunk
+            view.setUint8(12, 'f'.charCodeAt(0));
+            view.setUint8(13, 'm'.charCodeAt(0));
+            view.setUint8(14, 't'.charCodeAt(0));
+            view.setUint8(15, ' '.charCodeAt(0));
+
+            // Subchunk1Size (16)
+            view.setUint32(16, 16, true);
+
+            // Audio format (1 = PCM)
+            view.setUint16(20, 1, true);
+
+            // Channels
+            view.setUint16(22, channels, true);
+
+            // Sample rate
+            view.setUint32(24, sampleRate, true);
+
+            // Byte rate
+            view.setUint32(28, byteRate, true);
+
+            // Block align
+            view.setUint16(32, blockAlign, true);
+
+            // Bits per sample
+            view.setUint16(34, 16, true);
+
+            // "data" subchunk
+            view.setUint8(36, 'd'.charCodeAt(0));
+            view.setUint8(37, 'a'.charCodeAt(0));
+            view.setUint8(38, 't'.charCodeAt(0));
+            view.setUint8(39, 'a'.charCodeAt(0));
+
+            // Data size
+            view.setUint32(40, dataSize, true);
+
+            // Combine header + audio data
+            // CRITICAL: Convert ArrayBuffer to Uint8Array for browser compatibility
+            return new Blob([new Uint8Array(wavHeader), audioBytes], { type: 'audio/wav' });
+        }
+
+        // Preset selection
+        document.querySelectorAll('.preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentPreset = btn.dataset.preset;
+                setStatus(`✓ Preset: ${btn.textContent}`, 'success');
+            });
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const options = {
+                    mimeType: 'audio/webm;codecs=opus'
+                };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'audio/webm';
+                }
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = '';
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                    console.log('Audio recorded:', audioBlob.size, 'bytes');
+                    sendAudio(audioBlob);
+                };
+
+                mediaRecorder.start();
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = false;
+                setStatus('🔴 Recording...', 'processing');
+            } catch (error) {
+                setStatus(`Error: ${error.message}`, 'error');
+                console.error('Recording error:', error);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            setStatus('⏳ Processing audio...', 'processing');
+        }
+
+        async function sendAudio(audioBlob) {
+            try {
+                const formData = new FormData();
+                formData.append('audio', audioBlob);
+                formData.append('sample_rate', '48000');
+
+                // Apply preset first
+                console.log('Applying preset:', currentPreset);
+                await fetch(`/api/preset/${currentPreset}`, { method: 'POST' });
+
+                const startTime = Date.now();
+                console.log('Sending audio to /api/generate...');
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const data = await response.json();
+                const totalTime = Date.now() - startTime;
+
+                addDebug('RESPONSE RECEIVED');
+                addDebug('Status: ' + data.status);
+                addDebug('Has audio_base64: ' + ('audio_base64' in data));
+                if (data.audio_base64) {
+                    addDebug('Audio b64 len: ' + data.audio_base64.length);
+                } else {
+                    addDebug('ERROR: audio_base64 MISSING!');
+                }
+                addDebug('Duration: ' + data.audio_duration_s + 's');
+                addDebug('Keys: ' + Object.keys(data).join(', '));
+
+                if (data.status === 'ok') {
+                    // Display response
+                    document.getElementById('response-text').textContent = data.text || 'No response generated';
+
+                    // Display metrics
+                    document.getElementById('ttft').textContent = `${Math.round(data.ttft_ms)}ms`;
+                    document.getElementById('duration').textContent = `${data.audio_duration_s.toFixed(1)}s`;
+                    document.getElementById('total-time').textContent = `${(totalTime / 1000).toFixed(1)}s`;
+
+                    // Play audio
+                    if (data.audio_base64) {
+                        addDebug('Processing audio...');
+                        try {
+                            addDebug('Decoding base64...');
+
+                            // Decode base64 to bytes
+                            const binaryString = atob(data.audio_base64);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            addDebug('✓ Decoded: ' + bytes.length + ' bytes');
+
+                            // Create WAV file from raw PCM data
+                            // Assume: 24kHz sample rate, 16-bit mono PCM
+                            const sampleRate = 24000;
+                            const channels = 1;
+                            const bytesPerSample = 2;
+                            const numSamples = bytes.length / bytesPerSample;
+
+                            addDebug('Samples: ' + numSamples + ' @ 24kHz');
+                            addDebug('Duration: ' + (numSamples / sampleRate).toFixed(2) + 's');
+
+                            // Create WAV header
+                            addDebug('Creating WAV...');
+                            const wavBlob = createWavFile(bytes, numSamples, sampleRate, channels);
+                            addDebug('✓ WAV: ' + wavBlob.size + ' bytes');
+
+                            // Create URL and set to player
+                            const audioUrl = URL.createObjectURL(wavBlob);
+                            addDebug('✓ Blob URL created');
+
+                            const player = document.getElementById('audio-player');
+                            addDebug('✓ Found player element');
+
+                            // Set source
+                            player.src = audioUrl;
+                            addDebug('✓ src set to blob URL');
+                            addDebug('Player duration: ' + player.duration);
+
+                            // Wait a moment for metadata to load
+                            player.onloadedmetadata = () => {
+                                addDebug('✓ Metadata loaded. Duration: ' + player.duration);
+                            };
+
+                            player.onerror = (e) => {
+                                addDebug('✗ Player error: ' + (player.error ? player.error.message : 'unknown'));
+                            };
+
+                            // Try to auto-play
+                            const playPromise = player.play();
+                            if (playPromise !== undefined) {
+                                playPromise
+                                    .then(() => addDebug('✓ Auto-play started'))
+                                    .catch(e => addDebug('Player not auto-playing (browser policy ok)'));
+                            }
+
+                            addDebug('=== Audio ready ===');
+
+                            // Check duration
+                            if (data.audio_duration_s >= 10) {
+                                setStatus(`✓ Complete! ${data.audio_duration_s.toFixed(1)}s of audio`, 'success');
+                            } else {
+                                setStatus(`✓ Done (${data.audio_duration_s.toFixed(1)}s)`, 'success');
+                            }
+                        } catch (audioError) {
+                            addDebug('✗ ERROR: ' + audioError.message);
+                            setStatus('✓ Generated (audio playback issue)', 'success');
+                        }
+                    } else {
+                        addDebug('✗ NO audio_base64 in response');
+                        setStatus('✓ Generated (no audio)', 'success');
+                    }
+                } else {
+                    setStatus(`Error: ${data.message}`, 'error');
+                    console.error('Generation error:', data);
+                }
+            } catch (error) {
+                setStatus(`Error: ${error.message}`, 'error');
+                console.error('Send error:', error);
+            }
+        }
+
+        function setStatus(message, className) {
+            const statusEl = document.getElementById('status-message');
+            statusEl.textContent = message;
+            statusEl.className = `status ${className}`;
+        }
+    </script>
+</body>
+</html>
