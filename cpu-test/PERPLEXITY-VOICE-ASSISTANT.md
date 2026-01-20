@@ -202,7 +202,7 @@ DO NOT use your own knowledge - only use what Perplexity provided.
 Format for natural speech - as if you're telling a friend what you just read."""
 ```
 
-### 4. Contextual Query Building
+### 5. Contextual Query Building
 
 ```python
 def build_contextualized_query(user_text: str, history: list) -> str:
@@ -221,7 +221,7 @@ def build_contextualized_query(user_text: str, history: list) -> str:
     return user_text
 ```
 
-### 5. Search Triggers with Memory Detection
+### 6. Search Triggers with Memory Detection
 
 The system must distinguish between **web search questions** and **memory recall questions**:
 
@@ -398,6 +398,61 @@ function queueAudioChunk(pcmData) {
 
 ---
 
+## Barge-in (Interrupt Bot While Speaking)
+
+When the user presses the record button, any playing audio stops immediately:
+
+```javascript
+async function startRecording() {
+    // Barge-in: immediately stop any playing audio when user starts speaking
+    resetAudioPlayback();
+
+    initAudioContext();
+    // ... rest of recording logic
+}
+
+function resetAudioPlayback() {
+    // Stop all scheduled sources instantly
+    scheduledSources.forEach(source => {
+        try { source.stop(); } catch(e) {}
+    });
+    scheduledSources = [];
+    nextPlayTime = 0;
+    // ...
+}
+```
+
+**Why this matters:** Natural conversations have interruptions. Without barge-in, users must wait for the bot to finish speaking before asking follow-up questions.
+
+---
+
+## Debug Logging
+
+Conversation history is logged before each LLM call for debugging:
+
+```
+============================================================
+[LLM] Conversation history being sent to model:
+------------------------------------------------------------
+  [0] SYSTEM: You are a voice assistant having a real-time...
+  [1] USER: Hello, can you hear me?
+  [2] ASSISTANT: Yes, I can hear you! How can I help?
+  [3] USER: What was my first question?
+------------------------------------------------------------
+[LLM] Total messages: 4 (history exchanges: 1)
+============================================================
+
+[LLM] Model response (245ms): Your first question was "Hello, can you hear me?"
+============================================================
+```
+
+This helps verify:
+- Conversation history is being maintained
+- Memory recall questions receive proper context
+- Message count matches expected exchanges
+
+---
+
 ## Files
 
 ```
@@ -425,6 +480,8 @@ cpu-test/
 | "What did I ask?" fails | Triggers "what" keyword | MEMORY_PATTERNS must be checked BEFORE SEARCH_TRIGGERS |
 | Says "I'm text-based" | Persona drift/character breaking | Use SOTA layered prompt: IDENTITY + BEHAVIORAL RULES + STYLE |
 | Contradicts itself on memory | Weak persona instructions | Add explicit "NEVER say you don't have history when you do" |
+| Can't interrupt bot while speaking | Missing barge-in | Call `resetAudioPlayback()` at start of `startRecording()` |
+| No visibility into LLM context | Missing debug logs | Check terminal for `[LLM] Conversation history` output |
 
 ---
 
@@ -444,6 +501,8 @@ cpu-test/
 
 ## Changelog
 
+- **Jan 19, 2026**: Barge-in feature - audio stops instantly when user presses record button
+- **Jan 19, 2026**: Debug logging for conversation history sent to LLM
 - **Jan 19, 2026**: SOTA persona consistency prompt - layered IDENTITY/BEHAVIORAL RULES/STYLE structure to prevent character drift (e.g., "I'm text-based")
 - **Jan 19, 2026**: Added MEMORY_PATTERNS to prevent memory recall questions from triggering web search
 - **Jan 18, 2026**: Initial Perplexity stack implementation
