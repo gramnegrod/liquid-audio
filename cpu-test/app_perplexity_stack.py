@@ -64,6 +64,8 @@ if not CARTESIA_API_KEY:
     missing_keys.append("CARTESIA_API_KEY")
 if not PERPLEXITY_API_KEY:
     missing_keys.append("PERPLEXITY_API_KEY")
+if not CEREBRAS_API_KEY:
+    missing_keys.append("CEREBRAS_API_KEY")
 
 if missing_keys:
     print(f"\n[ERROR] Missing API keys: {', '.join(missing_keys)}")
@@ -446,29 +448,19 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     # Use 0.3 for search-grounded responses, 0.7 for general chat
     temp = 0.3 if search_context else 0.7
 
-    # Use Cerebras Qwen3-32B (2,400 t/s) if available, fallback to Groq
-    if cerebras_client:
-        response = cerebras_client.chat.completions.create(
-            model="qwen-3-32b",
-            messages=messages,
-            max_tokens=200,
-            temperature=temp,
-        )
-        model_used = "Cerebras Qwen3-32B"
-    else:
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            max_tokens=200,
-            temperature=temp,
-        )
-        model_used = "Groq Llama 3.3 70B"
+    # Cerebras Qwen3-32B @ 2,400 t/s (no fallback - fail loud if not configured)
+    response = cerebras_client.chat.completions.create(
+        model="qwen-3-32b",
+        messages=messages,
+        max_tokens=200,
+        temperature=temp,
+    )
 
     llm_latency = int((time.time() - start) * 1000) - search_latency
     reply = response.choices[0].message.content.strip()
 
     # Log model response
-    print(f"[LLM] {model_used} response ({llm_latency}ms): {reply}", flush=True)
+    print(f"[LLM] Cerebras Qwen3-32B response ({llm_latency}ms): {reply}", flush=True)
     print("="*60 + "\n", flush=True)
 
     # Store in history (keep last MAX_HISTORY exchanges)
@@ -1190,12 +1182,11 @@ def chat():
 @app.route('/health')
 def health():
     """Health check endpoint."""
-    llm_info = 'Cerebras Qwen3-32B @ 2,400 t/s' if CEREBRAS_API_KEY else 'Groq Llama 3.3 70B @ 280 t/s (fallback)'
     return jsonify({
         'status': 'ok',
         'stack': {
             'asr': 'Groq Whisper',
-            'llm': llm_info,
+            'llm': 'Cerebras Qwen3-32B @ 2,400 t/s',
             'router': 'Groq Llama 3.1 8B',
             'tts': 'Cartesia Sonic',
             'search': 'Perplexity Sonar' if PERPLEXITY_API_KEY else 'disabled',
@@ -1296,10 +1287,7 @@ if __name__ == '__main__':
     print("\nStack:")
     print("  - ASR: Groq Whisper (Universal)")
     print("  - Search: Perplexity Sonar (built-in synthesis)")
-    if CEREBRAS_API_KEY:
-        print("  - LLM: Cerebras Qwen3-32B @ 2,400 t/s")
-    else:
-        print("  - LLM: Groq Llama 3.3 70B @ 280 t/s (fallback)")
+    print("  - LLM: Cerebras Qwen3-32B @ 2,400 t/s")
     print("  - Router: Groq Llama 3.1 8B (search detection)")
     print("  - TTS: Cartesia (Sonic 2)")
     print(f"  - Search: Perplexity {'[ENABLED]' if PERPLEXITY_API_KEY else '[DISABLED]'}")
@@ -1314,7 +1302,7 @@ if __name__ == '__main__':
     print(f"  - GROQ_API_KEY: {'[SET]' if GROQ_API_KEY else '[MISSING]'}")
     print(f"  - CARTESIA_API_KEY: {'[SET]' if CARTESIA_API_KEY else '[MISSING]'}")
     print(f"  - PERPLEXITY_API_KEY: {'[SET]' if PERPLEXITY_API_KEY else '[MISSING]'}")
-    print(f"  - CEREBRAS_API_KEY: {'[SET]' if CEREBRAS_API_KEY else '[NOT SET - using Groq fallback]'}")
+    print(f"  - CEREBRAS_API_KEY: {'[SET]' if CEREBRAS_API_KEY else '[MISSING]'}")
     print("=" * 60 + "\n")
 
     if missing_keys:
