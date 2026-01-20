@@ -47,11 +47,13 @@ A voice assistant using Perplexity's Sonar model for search + synthesis. Perplex
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  LLM: Groq Llama 3.3 70B (~200ms)                               │
+│  LLM: Cerebras Qwen3-32B @ 2,400 t/s                            │
+│  - 8x faster than Groq Llama 3.3 70B                             │
 │  - Reformats Perplexity answer for voice                         │
 │  - Removes citation brackets [1], [2]                            │
 │  - Condenses to 2-3 spoken sentences                             │
 │  - Does NOT add any new information                              │
+│  (Falls back to Groq if CEREBRAS_API_KEY not set)                │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -89,12 +91,15 @@ Your LLM just reformats for voice - it doesn't interpret or add information.
 
 ## Tech Stack
 
-| Component | Service | Model/API | Latency |
-|-----------|---------|-----------|---------|
+| Component | Service | Model/API | Speed |
+|-----------|---------|-----------|-------|
 | ASR | Groq | `whisper-large-v3-turbo` | ~200ms |
 | Search+Synthesis | Perplexity | `sonar` | ~3-5s |
-| Voice Formatting | Groq | `llama-3.3-70b-versatile` | ~200ms |
+| Router | Groq | `llama-3.1-8b-instant` | ~50ms |
+| **Main LLM** | **Cerebras** | **`qwen-3-32b`** | **2,400 t/s** |
 | TTS | Cartesia | `sonic-2` | ~75ms TTFB |
+
+> **Note:** If `CEREBRAS_API_KEY` is not set, falls back to Groq `llama-3.3-70b-versatile` @ 280 t/s
 
 ---
 
@@ -293,9 +298,13 @@ For voice assistants, `sonar` is the best balance of speed and accuracy.
 
 ```bash
 # Required
-GROQ_API_KEY=gsk_...
-PERPLEXITY_API_KEY=pplx-...
-CARTESIA_API_KEY=...
+GROQ_API_KEY=gsk_...           # For ASR (Whisper) and Router (8B)
+PERPLEXITY_API_KEY=pplx-...    # For search + synthesis
+CARTESIA_API_KEY=...           # For TTS
+
+# Recommended (8x faster LLM)
+CEREBRAS_API_KEY=...           # Get from https://cloud.cerebras.ai/
+                               # Falls back to Groq if not set
 
 # Optional (backup ASR)
 ASSEMBLYAI_API_KEY=...
@@ -501,6 +510,7 @@ cpu-test/
 
 ## Changelog
 
+- **Jan 19, 2026**: 🧠 **Upgraded main LLM to Cerebras Qwen3-32B** - 8x faster (2,400 t/s vs 280 t/s), with automatic fallback to Groq if key not set
 - **Jan 19, 2026**: Barge-in feature - audio stops instantly when user presses record button
 - **Jan 19, 2026**: Debug logging for conversation history sent to LLM
 - **Jan 19, 2026**: SOTA persona consistency prompt - layered IDENTITY/BEHAVIORAL RULES/STYLE structure to prevent character drift (e.g., "I'm text-based")

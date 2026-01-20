@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Ultra-Low Latency Voice Assistant (Perplexity Search Edition)
-Groq Whisper (ASR) + Perplexity (Search) + Groq (LLM) + Cartesia (TTS)
+Groq Whisper (ASR) + Perplexity (Search) + Cerebras Qwen3-32B (LLM) + Cartesia (TTS)
+
+Architecture:
+    - Router: Groq Llama 3.1 8B (fast search detection)
+    - Main LLM: Cerebras Qwen3-32B @ 2,400 t/s (or Groq fallback @ 280 t/s)
 
 Target: ~500ms without search, ~4-6s with search
 Port: 5008
@@ -9,6 +13,9 @@ Port: 5008
 Usage:
     python app_perplexity_stack.py
     (loads .env file automatically)
+
+Environment:
+    CEREBRAS_API_KEY - Get from https://cloud.cerebras.ai/
 """
 
 # Load .env file FIRST before any other imports
@@ -45,6 +52,7 @@ ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 CARTESIA_API_KEY = os.environ.get("CARTESIA_API_KEY")
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY")
+CEREBRAS_API_KEY = os.environ.get("CEREBRAS_API_KEY")
 
 # Validate keys
 missing_keys = []
@@ -73,6 +81,12 @@ perplexity_client = OpenAI(
     api_key=PERPLEXITY_API_KEY,
     base_url="https://api.perplexity.ai"
 ) if PERPLEXITY_API_KEY else None
+
+# Cerebras client (OpenAI-compatible API) - Main LLM brain (2,400 t/s)
+cerebras_client = OpenAI(
+    api_key=CEREBRAS_API_KEY,
+    base_url="https://api.cerebras.ai/v1"
+) if CEREBRAS_API_KEY else None
 
 # Cartesia settings
 CARTESIA_API_URL = "https://api.cartesia.ai/tts/bytes"
@@ -288,7 +302,7 @@ def transcribe_audio_assemblyai(audio_path: str) -> tuple[str, int]:
 
 
 # =============================================================================
-# Groq - LLM (Llama 3.3 70B)
+# LLM - Cerebras Qwen3-32B (primary) / Groq Llama 3.3 70B (fallback)
 # =============================================================================
 
 SYSTEM_PROMPT = """You are a voice assistant having a real-time spoken conversation.
@@ -432,18 +446,29 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     # Use 0.3 for search-grounded responses, 0.7 for general chat
     temp = 0.3 if search_context else 0.7
 
-    response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        max_tokens=200,
-        temperature=temp,
-    )
+    # Use Cerebras Qwen3-32B (2,400 t/s) if available, fallback to Groq
+    if cerebras_client:
+        response = cerebras_client.chat.completions.create(
+            model="qwen-3-32b",
+            messages=messages,
+            max_tokens=200,
+            temperature=temp,
+        )
+        model_used = "Cerebras Qwen3-32B"
+    else:
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=200,
+            temperature=temp,
+        )
+        model_used = "Groq Llama 3.3 70B"
 
     llm_latency = int((time.time() - start) * 1000) - search_latency
     reply = response.choices[0].message.content.strip()
 
     # Log model response
-    print(f"[LLM] Model response ({llm_latency}ms): {reply}", flush=True)
+    print(f"[LLM] {model_used} response ({llm_latency}ms): {reply}", flush=True)
     print("="*60 + "\n", flush=True)
 
     # Store in history (keep last MAX_HISTORY exchanges)
@@ -751,7 +776,7 @@ HTML_TEMPLATE = '''
 
         <div class="stack-badge">
             <span class="badge asr">ASR: Groq Whisper</span>
-            <span class="badge llm">LLM: Llama 3.3 70B</span>
+            <span class="badge llm">LLM: Cerebras Qwen3-32B</span>
             <span class="badge tts">TTS: Cartesia Sonic</span>
         </div>
 
@@ -1165,11 +1190,13 @@ def chat():
 @app.route('/health')
 def health():
     """Health check endpoint."""
+    llm_info = 'Cerebras Qwen3-32B @ 2,400 t/s' if CEREBRAS_API_KEY else 'Groq Llama 3.3 70B @ 280 t/s (fallback)'
     return jsonify({
         'status': 'ok',
         'stack': {
             'asr': 'Groq Whisper',
-            'llm': 'Groq Llama 3.3 70B',
+            'llm': llm_info,
+            'router': 'Groq Llama 3.1 8B',
             'tts': 'Cartesia Sonic',
             'search': 'Perplexity Sonar' if PERPLEXITY_API_KEY else 'disabled',
         },
@@ -1178,6 +1205,7 @@ def health():
             'groq': bool(GROQ_API_KEY),
             'cartesia': bool(CARTESIA_API_KEY),
             'perplexity': bool(PERPLEXITY_API_KEY),
+            'cerebras': bool(CEREBRAS_API_KEY),
         },
         'memory': {
             'exchanges': len(conversation_history),
@@ -1268,7 +1296,11 @@ if __name__ == '__main__':
     print("\nStack:")
     print("  - ASR: Groq Whisper (Universal)")
     print("  - Search: Perplexity Sonar (built-in synthesis)")
-    print("  - LLM: Groq (Llama 3.3 70B) - formats for voice")
+    if CEREBRAS_API_KEY:
+        print("  - LLM: Cerebras Qwen3-32B @ 2,400 t/s")
+    else:
+        print("  - LLM: Groq Llama 3.3 70B @ 280 t/s (fallback)")
+    print("  - Router: Groq Llama 3.1 8B (search detection)")
     print("  - TTS: Cartesia (Sonic 2)")
     print(f"  - Search: Perplexity {'[ENABLED]' if PERPLEXITY_API_KEY else '[DISABLED]'}")
     print("\nFeatures:")
@@ -1282,6 +1314,7 @@ if __name__ == '__main__':
     print(f"  - GROQ_API_KEY: {'[SET]' if GROQ_API_KEY else '[MISSING]'}")
     print(f"  - CARTESIA_API_KEY: {'[SET]' if CARTESIA_API_KEY else '[MISSING]'}")
     print(f"  - PERPLEXITY_API_KEY: {'[SET]' if PERPLEXITY_API_KEY else '[MISSING]'}")
+    print(f"  - CEREBRAS_API_KEY: {'[SET]' if CEREBRAS_API_KEY else '[NOT SET - using Groq fallback]'}")
     print("=" * 60 + "\n")
 
     if missing_keys:
