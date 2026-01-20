@@ -459,6 +459,10 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     llm_latency = int((time.time() - start) * 1000) - search_latency
     reply = response.choices[0].message.content.strip()
 
+    # Strip Qwen thinking tags - model outputs <think>...</think> reasoning
+    import re
+    reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL).strip()
+
     # Log model response
     print(f"[LLM] Cerebras Qwen3-32B response ({llm_latency}ms): {reply}", flush=True)
     print("="*60 + "\n", flush=True)
@@ -1273,6 +1277,97 @@ def sts_endpoint():
                 pass
 
     return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/sts-sync', methods=['POST'])
+def sts_sync_endpoint():
+    """
+    Synchronous STS endpoint for test harness.
+    Accepts: multipart/form-data with 'audio' file
+    Returns: JSON with {audio: base64, text: str, ttfa_ms: int}
+    """
+    if 'audio' not in request.files:
+        return jsonify({'error': 'No audio file provided'}), 400
+
+    audio_file = request.files['audio']
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            audio_file.save(f)
+            wav_path = f.name
+    except Exception as e:
+        return jsonify({'error': f'File save error: {e}'}), 500
+
+    try:
+        total_start = time.time()
+
+        # 1. ASR with Groq Whisper
+        transcription, asr_time = transcribe_audio_groq_whisper(wav_path)
+        if not transcription:
+            return jsonify({'error': 'No speech detected'}), 400
+
+        # 2. LLM with Cerebras
+        reply, llm_time, search_time = generate_response_groq(transcription)
+
+        # 3. TTS with Cartesia (collect all chunks)
+        audio_chunks = []
+        ttfb_ms = None
+        tts_start = time.time()
+
+        for chunk_type, data in synthesize_speech_cartesia_streaming(reply, sample_rate=48000):
+            if chunk_type == "audio":
+                if ttfb_ms is None:
+                    ttfb_ms = int((time.time() - tts_start) * 1000)
+                audio_chunks.append(data)
+
+        # Combine audio chunks and add WAV header
+        raw_pcm = b''.join(audio_chunks)
+        wav_bytes = _add_wav_header(raw_pcm, sample_rate=48000)
+
+        total_time = int((time.time() - total_start) * 1000)
+
+        return jsonify({
+            'audio': base64.b64encode(wav_bytes).decode('ascii'),
+            'text': reply,
+            'ttfa_ms': ttfb_ms,
+            'total_ms': total_time,
+            'asr_ms': asr_time,
+            'llm_ms': llm_time,
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            os.unlink(wav_path)
+        except:
+            pass
+
+
+def _add_wav_header(pcm_data: bytes, sample_rate: int = 48000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Add WAV header to raw PCM data."""
+    import struct
+    data_size = len(pcm_data)
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF',
+        36 + data_size,
+        b'WAVE',
+        b'fmt ',
+        16,  # Subchunk1Size (16 for PCM)
+        1,   # AudioFormat (1 for PCM)
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b'data',
+        data_size
+    )
+    return header + pcm_data
 
 
 # =============================================================================
