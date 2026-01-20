@@ -460,8 +460,11 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     reply = response.choices[0].message.content.strip()
 
     # Strip Qwen thinking tags - model outputs <think>...</think> reasoning
+    # Handle both closed tags and unclosed tags (model may not close the tag)
     import re
-    reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL).strip()
+    reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL)  # Closed tags
+    reply = re.sub(r'<think>.*', '', reply, flags=re.DOTALL)  # Unclosed tags
+    reply = reply.strip()
 
     # Log model response
     print(f"[LLM] Cerebras Qwen3-32B response ({llm_latency}ms): {reply}", flush=True)
