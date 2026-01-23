@@ -429,6 +429,11 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     reply = re.sub(r'<think>.*', '', reply, flags=re.DOTALL)  # Unclosed tags
     reply = reply.strip()
 
+    # Guard against empty response after stripping (prevents TTS 400 error)
+    if not reply:
+        reply = "I'm sorry, I wasn't able to generate a response. Could you try again?"
+        print("[LLM] WARNING: Empty response after stripping think tags, using fallback", flush=True)
+
     # Log model response
     print(f"[LLM] Cerebras Qwen3-32B response ({llm_latency}ms): {reply}", flush=True)
     print("="*60 + "\n", flush=True)
@@ -1403,8 +1408,8 @@ def sts_sync_endpoint():
         if not transcription:
             return jsonify({'error': 'No speech detected'}), 400
 
-        # 2. LLM with Cerebras
-        reply, llm_time, search_time = generate_response_groq(transcription)
+        # 2. LLM with Cerebras (use unified dispatcher for LangGraph support)
+        reply, llm_time, search_time = generate_response(transcription)
 
         # 3. TTS with Cartesia (collect all chunks)
         audio_chunks = []
