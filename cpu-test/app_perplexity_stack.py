@@ -27,11 +27,15 @@ import base64
 import io
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
 import wave
+from datetime import datetime
 from pathlib import Path
+
+import pytz
 
 import numpy as np
 from flask import Flask, Response, jsonify, render_template_string, request
@@ -41,6 +45,30 @@ import assemblyai as aai
 from groq import Groq
 import httpx
 from openai import OpenAI  # Perplexity uses OpenAI-compatible API
+
+# Search router module (v3 - two-phase architecture with barge-in support)
+from search_router import (
+    init_router, route, RouteDecision,
+    cancel_request, get_topic_cache, clear_topic_cache
+)
+
+# LangGraph integration (optional - enable with USE_LANGGRAPH=true)
+USE_LANGGRAPH = os.environ.get("USE_LANGGRAPH", "").lower() == "true"
+_langgraph_workflow = None
+_semantic_cache = None
+
+if USE_LANGGRAPH:
+    try:
+        from chatbot_graph import create_chatbot_graph, run_query_sync, LANGGRAPH_AVAILABLE
+        from semantic_cache import get_semantic_cache, CHROMADB_AVAILABLE
+        from memory_service import get_memory_service_sync
+        print("[LangGraph] LangGraph workflow enabled")
+    except ImportError as e:
+        print(f"[LangGraph] Import failed: {e}")
+        USE_LANGGRAPH = False
+
+# Track active request for barge-in cancellation
+_active_request_id: str | None = None
 
 app = Flask(__name__)
 
@@ -78,6 +106,10 @@ if missing_keys:
 aai.settings.api_key = ASSEMBLYAI_API_KEY
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
+# Initialize search router with Groq client
+if groq_client:
+    init_router(groq_client)
+
 # Perplexity uses OpenAI-compatible API
 perplexity_client = OpenAI(
     api_key=PERPLEXITY_API_KEY,
@@ -89,6 +121,29 @@ cerebras_client = OpenAI(
     api_key=CEREBRAS_API_KEY,
     base_url="https://api.cerebras.ai/v1"
 ) if CEREBRAS_API_KEY else None
+
+# Initialize LangGraph workflow if enabled
+if USE_LANGGRAPH and groq_client and perplexity_client and cerebras_client:
+    try:
+        from chatbot_graph import create_chatbot_graph
+        from semantic_cache import get_semantic_cache
+
+        def _get_system_prompt():
+            """Wrapper for build_system_prompt (defined later)."""
+            return build_system_prompt()
+
+        _langgraph_workflow = create_chatbot_graph(
+            groq_client=groq_client,
+            perplexity_client=perplexity_client,
+            cerebras_client=cerebras_client,
+            system_prompt_fn=_get_system_prompt,
+        )
+        _semantic_cache = get_semantic_cache()
+        print("[LangGraph] Workflow initialized successfully")
+    except Exception as e:
+        print(f"[LangGraph] Initialization failed: {e}")
+        USE_LANGGRAPH = False
+        _langgraph_workflow = None
 
 # Cartesia settings
 CARTESIA_API_URL = "https://api.cartesia.ai/tts/bytes"
@@ -102,92 +157,77 @@ _audio_cache = {}
 
 # Conversation memory (last 10 exchanges)
 conversation_history = []
-MAX_HISTORY = 10
+MAX_HISTORY = 5  # Reduced from 10 - too much context confuses simple questions
+
+
+# =============================================================================
+# Dynamic System Prompts with Date/Time Injection
+# =============================================================================
+
+def get_current_datetime_cst() -> tuple[str, str]:
+    """Get current date and time in Central Time (user's timezone)."""
+    cst = pytz.timezone('America/Chicago')
+    now = datetime.now(cst)
+    date_str = now.strftime("%A, %B %d, %Y")  # e.g., "Tuesday, January 21, 2025"
+    time_str = now.strftime("%I:%M %p CST")   # e.g., "3:45 PM CST"
+    return date_str, time_str
+
+
+def build_system_prompt() -> str:
+    """Build system prompt with current date/time injected."""
+    date_str, time_str = get_current_datetime_cst()
+    return f"""You are a voice assistant having a real-time spoken conversation.
+
+IMPORTANT: Respond directly. Do NOT use <think> tags or show your reasoning.
+
+## CURRENT CONTEXT (use this for date/time questions)
+Today: {date_str}
+Current Time: {time_str}
+
+## RESPONSE RULES
+- Maximum 35 words per response (voice output must be concise)
+- One main idea per response
+- Natural conversational tone
+- If unsure, say "I'm not certain about that" - never fabricate
+
+## IDENTITY
+- You ARE speaking with the user - they hear your voice
+- This is live audio, not text chat
+
+## GROUNDING
+- For "what day/date/time" questions: use CURRENT CONTEXT above, don't search
+- Never make up facts - if you don't know, say so
+- Use conversation history for recall questions"""
+
+
+def build_search_prompt() -> str:
+    """Build search reformatter prompt with current date/time."""
+    date_str, time_str = get_current_datetime_cst()
+    return f"""You are a voice assistant with access to search results and conversation history.
+
+IMPORTANT: Respond directly. Do NOT use <think> tags.
+
+## CURRENT CONTEXT
+Today: {date_str}
+Current Time: {time_str}
+
+## CRITICAL: USE CONVERSATION HISTORY
+- The user may refer to things mentioned earlier ("the team", "their record", "that game")
+- ALWAYS check conversation history to understand what they're referring to
+- If they asked about "Texas Tech basketball" earlier and now ask "what's their record", THEY MEAN TEXAS TECH
+- Never say "I need more context" if the context is in conversation history
+
+## RESPONSE RULES
+- Maximum 50 words (2-3 short sentences)
+- Remove citation brackets [1], [2], [3] - just state facts
+- Combine search results WITH conversation context to give accurate answers
+- If search found nothing useful, say "I couldn't find current information on that"
+- Convert UTC times to Central Time if needed"""
+
 
 # =============================================================================
 # Web Search (Perplexity)
 # =============================================================================
-
-# Keywords that trigger web search - be aggressive to avoid hallucinations
-SEARCH_TRIGGERS = [
-    # Explicit search requests
-    "search for", "look up", "find out", "search", "google", "look online", "find online",
-    "research", "check the web", "find me",
-    # Current events
-    "what's the latest", "current news", "recent news", "today's", "this week",
-    "what is the current", "what are the latest", "news about", "latest",
-    # Questions about recent events
-    "who won", "what happened", "when did", "where is", "how much is",
-    "who is", "what is", "who was", "what was", "who are", "what are",
-    # Finance / stocks / prices
-    "stock", "market", "price of", "how much does", "cost of",
-    "bitcoin", "crypto", "dow jones", "s&p", "nasdaq",
-    # Weather
-    "weather", "temperature", "forecast",
-    # Sports - expanded
-    "score", "game", "match", "playoff", "championship", "stats", "statistics",
-    "points", "goals", "touchdown", "winner", "loser", "team", "player",
-    "nba", "nfl", "mlb", "nhl", "ncaa", "college", "basketball", "football",
-    # General factual queries
-    "tell me about", "give me", "how many", "how much", "when is", "where is",
-]
-
-def should_search(text: str) -> bool:
-    """Detect if user query needs web search."""
-    text_lower = text.lower()
-
-    # Memory/conversation questions should NOT trigger search
-    MEMORY_PATTERNS = [
-        "first question", "last question", "previous question",
-        "did i ask", "did i say", "what did i",
-        "i asked you", "i told you", "i said",
-        "our conversation", "this conversation",
-        "remember when", "earlier i",
-        "my name", "who am i",
-    ]
-
-    # If it's a memory question, don't search
-    if any(pattern in text_lower for pattern in MEMORY_PATTERNS):
-        print(f"[Search] Skipped - memory question detected: '{text[:50]}'", flush=True)
-        return False
-
-    return any(trigger in text_lower for trigger in SEARCH_TRIGGERS)
-
-
-def build_contextualized_query(user_text: str, history: list) -> str:
-    """
-    Build a search query that includes conversation context.
-    This prevents ambiguous queries like "who won?" from returning unrelated results.
-    """
-    if not history:
-        return user_text
-
-    # Get the last 2-3 exchanges for context (most relevant recent context)
-    recent_history = history[-3:] if len(history) >= 3 else history
-
-    # Build context summary from recent conversation
-    context_parts = []
-    for exchange in recent_history:
-        # Include key info from both user questions and assistant responses
-        context_parts.append(exchange.get("user", ""))
-        context_parts.append(exchange.get("assistant", ""))
-
-    context_text = " ".join(context_parts)
-
-    # For short/ambiguous queries, prepend conversation context
-    # This turns "who was the high scorer?" into "Texas Tech BYU basketball game who was the high scorer?"
-    if len(user_text.split()) < 10:  # Short query likely needs context
-        # Extract key entities from context (simple approach: just use last exchange)
-        last_exchange = history[-1] if history else {}
-        last_topic = last_exchange.get("assistant", "")[:200]  # First 200 chars of last response
-
-        # Build enriched query
-        enriched_query = f"{last_topic} {user_text}"
-        print(f"[Search] Enriched query: '{user_text}' → '{enriched_query[:100]}...'", flush=True)
-        return enriched_query
-
-    return user_text
-
 
 def web_search(query: str, max_results: int = 5, topic: str = "general") -> tuple[str, int]:
     """
@@ -304,89 +344,15 @@ def transcribe_audio_assemblyai(audio_path: str) -> tuple[str, int]:
 
 
 # =============================================================================
-# LLM - Cerebras Qwen3-32B (primary) / Groq Llama 3.3 70B (fallback)
+# LLM - Cerebras Qwen3-32B (primary)
 # =============================================================================
-
-SYSTEM_PROMPT = """You are a voice assistant having a real-time spoken conversation.
-
-IMPORTANT: Respond directly. Do NOT use <think> tags or show your reasoning.
-
-IDENTITY:
-- You ARE speaking with the user - they hear your voice, you hear theirs
-- This is a live audio conversation, not text chat
-
-BEHAVIORAL RULES:
-- NEVER say you are "text-based" or cannot hear
-- NEVER say you don't have access to conversation history when you do
-- Use the conversation history in messages to answer recall questions accurately
-
-RESPONSE STYLE:
-- 2-3 sentences unless more detail requested
-- Conversational, natural spoken rhythm
-- Direct answers without hedging"""
-
-SYSTEM_PROMPT_WITH_SEARCH = """You are reformatting a Perplexity search result for voice output.
-
-IMPORTANT: Respond directly. Do NOT use <think> tags or show your reasoning.
-
-The user's message contains a PERPLEXITY ANSWER that has already been researched and verified.
-
-Your job:
-1. Condense the Perplexity answer into 2-3 natural spoken sentences
-2. Keep the key facts and numbers exactly as stated
-3. Remove citation brackets like [1], [2] for voice (just state the facts)
-4. If Perplexity said it couldn't find something, relay that
-
-DO NOT add any information not in the Perplexity answer.
-DO NOT use your own knowledge - only use what Perplexity provided.
-
-Format for natural speech - as if you're telling a friend what you just read."""
-
-def check_search_relevance(user_text: str, search_context: str) -> tuple[bool, str]:
-    """
-    Quick LLM check: Are search results relevant? If not, suggest better query.
-    Returns (is_relevant, suggested_query)
-    """
-    if not search_context:
-        return False, user_text
-
-    check_prompt = f"""User asked: "{user_text}"
-
-Search results preview: {search_context[:1000]}
-
-Is this relevant? Reply ONLY with:
-- "YES" if results answer the question
-- "NO: <better search query>" if results are off-topic
-
-Example: "NO: Texas Tech BYU basketball box score January 2026" """
-
-    try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",  # Fast small model for this check
-            messages=[{"role": "user", "content": check_prompt}],
-            max_tokens=50,
-            temperature=0,
-        )
-        result = response.choices[0].message.content.strip()
-
-        if result.upper().startswith("YES"):
-            return True, ""
-        elif result.upper().startswith("NO:"):
-            better_query = result[3:].strip()
-            print(f"[Search] Results not relevant, retry with: '{better_query}'", flush=True)
-            return False, better_query
-    except Exception as e:
-        print(f"[Search] Relevance check error: {e}", flush=True)
-
-    return True, ""  # Default to using results if check fails
 
 
 def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     """
-    Generate response using Groq's Llama 3.3 70B.
+    Generate response using Cerebras Qwen3-32B.
     Includes conversation history for multi-turn memory.
-    Performs web search if query triggers search keywords.
-    Multi-step: retries with better query if first search misses.
+    Smart search routing: only searches for real-time data (weather, prices, etc.)
     Returns (response_text, llm_latency_ms, search_latency_ms)
     """
     global conversation_history
@@ -394,33 +360,36 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     search_latency = 0
     search_context = ""
 
-    # Check if web search is needed
-    if should_search(user_text):
-        print(f"[Search] Triggered for: '{user_text}'", flush=True)
+    # Check if web search is needed (smart routing via search_router v3 - two-phase)
+    # Phase 1: Context resolution (uses topic cache + history)
+    # Phase 2: Routing classification (SEARCH vs KNOWLEDGE)
+    global _active_request_id
+    route_result = route(user_text, conversation_history)
+    _active_request_id = route_result.request_id  # Track for barge-in
 
-        # Build contextualized query using conversation history
-        search_query = build_contextualized_query(user_text, conversation_history)
-        search_context, search_latency = web_search(search_query)
+    # Log the resolved context if different from original
+    if route_result.resolved_context:
+        print(f"[Router] Topic context: '{route_result.resolved_context}'", flush=True)
 
-        # Multi-step: Check if results are relevant, retry if not
-        if search_context:
-            is_relevant, better_query = check_search_relevance(user_text, search_context)
-            if not is_relevant and better_query:
-                print(f"[Search] Retry search with: '{better_query}'", flush=True)
-                retry_context, retry_latency = web_search(better_query)
-                if retry_context:
-                    search_context = retry_context
-                    search_latency += retry_latency
-    else:
-        print(f"[Search] NOT triggered for: '{user_text}'", flush=True)
+    if route_result.decision == RouteDecision.SEARCH:
+        search_context, search_latency = web_search(route_result.rewritten_query)
+        print(f"[Search] '{user_text}' → '{route_result.rewritten_query}'", flush=True)
+    elif route_result.decision == RouteDecision.CLARIFY:
+        # Low confidence - ask for clarification instead of guessing
+        print(f"[Router] CLARIFY needed: {route_result.clarification_question}", flush=True)
+        clarify_response = f"I want to make sure I search for the right thing. {route_result.clarification_question} Or could you tell me which team or game you're asking about?"
+        # Don't add to history since we're asking for clarification
+        _active_request_id = None
+        return clarify_response, route_result.latency_ms, 0
 
     # Choose system prompt based on whether we have search results
-    system_prompt = SYSTEM_PROMPT_WITH_SEARCH if search_context else SYSTEM_PROMPT
+    # Dynamic prompts inject current date/time automatically
+    system_prompt = build_search_prompt() if search_context else build_system_prompt()
 
     # Build messages with history
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Add conversation history (last 10 exchanges)
+    # Add conversation history
     for exchange in conversation_history:
         messages.append({"role": "user", "content": exchange["user"]})
         messages.append({"role": "assistant", "content": exchange["assistant"]})
@@ -433,30 +402,22 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
 
     messages.append({"role": "user", "content": user_content})
 
-    # Log conversation history for debugging
+    # Log for debugging
     print("\n" + "="*60, flush=True)
-    print("[LLM] Conversation history being sent to model:", flush=True)
-    print("-"*60, flush=True)
-    for i, msg in enumerate(messages):
-        role = msg["role"].upper()
-        content = msg["content"]
-        # Truncate long content for readability
-        if len(content) > 200:
-            content = content[:200] + "..."
-        print(f"  [{i}] {role}: {content}", flush=True)
-    print("-"*60, flush=True)
-    print(f"[LLM] Total messages: {len(messages)} (history exchanges: {len(conversation_history)})", flush=True)
+    print(f"[LLM] System prompt date: {get_current_datetime_cst()[0]}", flush=True)
+    print(f"[LLM] Search used: {'Yes' if search_context else 'No'}", flush=True)
+    print(f"[LLM] History exchanges: {len(conversation_history)}", flush=True)
     print("="*60 + "\n", flush=True)
 
-    # Lower temperature for factual accuracy (research shows this reduces hallucination)
-    # Use 0.3 for search-grounded responses, 0.7 for general chat
-    temp = 0.3 if search_context else 0.7
+    # Lower temperature for factual accuracy
+    # Use 0.3 for search-grounded responses, 0.5 for general chat (was 0.7)
+    temp = 0.3 if search_context else 0.5
 
-    # Cerebras Qwen3-32B @ 2,400 t/s (no fallback - fail loud if not configured)
+    # Cerebras Qwen3-32B @ 2,400 t/s
     response = cerebras_client.chat.completions.create(
         model="qwen-3-32b",
         messages=messages,
-        max_tokens=200,
+        max_tokens=150,  # Reduced from 200 for shorter voice responses
         temperature=temp,
     )
 
@@ -464,8 +425,6 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
     reply = response.choices[0].message.content.strip()
 
     # Strip Qwen thinking tags - model outputs <think>...</think> reasoning
-    # Handle both closed tags and unclosed tags (model may not close the tag)
-    import re
     reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL)  # Closed tags
     reply = re.sub(r'<think>.*', '', reply, flags=re.DOTALL)  # Unclosed tags
     reply = reply.strip()
@@ -480,6 +439,102 @@ def generate_response_groq(user_text: str) -> tuple[str, int, int]:
         conversation_history.pop(0)
 
     return reply, llm_latency, search_latency
+
+
+def generate_response_langgraph(user_text: str, session_id: str = "default") -> tuple[str, int, int]:
+    """
+    Generate response using LangGraph workflow.
+
+    This is an alternative to generate_response_groq that uses the LangGraph
+    state machine for better observability and structured execution.
+
+    Enable with: USE_LANGGRAPH=true
+
+    Returns (response_text, llm_latency_ms, search_latency_ms)
+    """
+    global conversation_history, _langgraph_workflow, _semantic_cache
+
+    if not _langgraph_workflow:
+        print("[LangGraph] Workflow not initialized, falling back to standard router")
+        return generate_response_groq(user_text)
+
+    start = time.time()
+
+    # Check semantic cache first
+    if _semantic_cache:
+        cached = _semantic_cache.get(user_text)
+        if cached:
+            print(f"[LangGraph] Cache HIT: '{user_text[:40]}...'")
+            # Still update conversation history for context
+            conversation_history.append({"user": user_text, "assistant": cached.response})
+            if len(conversation_history) > MAX_HISTORY:
+                conversation_history.pop(0)
+            return cached.response, cached.latency_ms, 0
+
+    # Convert conversation_history to LangGraph format
+    from chatbot_state import ConversationTurn
+    short_term_memory = [
+        ConversationTurn(
+            user=turn["user"],
+            assistant=turn["assistant"],
+            timestamp=time.time(),
+            topic=None,
+            search_used=False,
+        )
+        for turn in conversation_history
+    ]
+
+    try:
+        # Run through LangGraph workflow
+        from chatbot_graph import run_query_sync
+        result = run_query_sync(
+            graph=_langgraph_workflow,
+            query=user_text,
+            session_id=session_id,
+            short_term_memory=short_term_memory,
+        )
+
+        reply = result.get("response", "I'm sorry, I couldn't generate a response.")
+        search_latency = result.get("search_latency_ms", 0)
+        llm_latency = result.get("response_latency_ms", 0)
+        total_latency = result.get("total_latency_ms", int((time.time() - start) * 1000))
+
+        # Log workflow path
+        route = result.get("route", "unknown")
+        confidence = result.get("resolution_confidence", 0)
+        print(f"[LangGraph] Route: {route}, Confidence: {confidence:.2f}, Total: {total_latency}ms")
+
+        # Cache the response if it was a search
+        if _semantic_cache and route == "search":
+            _semantic_cache.set(
+                query=user_text,
+                response=reply,
+                route=route,
+                latency_ms=total_latency,
+            )
+
+        # Update conversation history
+        conversation_history.append({"user": user_text, "assistant": reply})
+        if len(conversation_history) > MAX_HISTORY:
+            conversation_history.pop(0)
+
+        return reply, llm_latency, search_latency
+
+    except Exception as e:
+        print(f"[LangGraph] Error: {e}, falling back to standard router")
+        return generate_response_groq(user_text)
+
+
+def generate_response(user_text: str, session_id: str = "default") -> tuple[str, int, int]:
+    """
+    Main response generator - dispatches to LangGraph or standard router.
+
+    Uses LangGraph if USE_LANGGRAPH=true, otherwise uses standard router.
+    """
+    if USE_LANGGRAPH and _langgraph_workflow:
+        return generate_response_langgraph(user_text, session_id)
+    else:
+        return generate_response_groq(user_text)
 
 
 # =============================================================================
@@ -502,13 +557,13 @@ def synthesize_speech_cartesia_streaming(text: str, sample_rate: int = 24000):
 
     headers = {
         "X-API-Key": CARTESIA_API_KEY,
-        "Cartesia-Version": "2024-06-10",
+        "Cartesia-Version": "2025-04-16",
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
     }
 
     payload = {
-        "model_id": "sonic-2",
+        "model_id": "sonic-3",
         "transcript": text,
         "voice": {
             "mode": "id",
@@ -521,8 +576,13 @@ def synthesize_speech_cartesia_streaming(text: str, sample_rate: int = 24000):
         },
     }
 
+    print(f"[TTS] Calling Cartesia SSE with model_id: {payload['model_id']}, voice: {payload['voice']['id']}", flush=True)
+
     with httpx.Client(timeout=60.0) as client:
         with client.stream("POST", "https://api.cartesia.ai/tts/sse", headers=headers, json=payload) as response:
+            if response.status_code != 200:
+                error_body = response.read().decode()
+                print(f"[TTS] ERROR {response.status_code}: {error_body[:500]}", flush=True)
             response.raise_for_status()
 
             buffer = ""
@@ -569,12 +629,12 @@ def synthesize_speech_cartesia(text: str) -> tuple[bytes, int]:
 
     headers = {
         "X-API-Key": CARTESIA_API_KEY,
-        "Cartesia-Version": "2024-06-10",
+        "Cartesia-Version": "2025-04-16",
         "Content-Type": "application/json",
     }
 
     payload = {
-        "model_id": "sonic-2",
+        "model_id": "sonic-3",
         "transcript": text,
         "voice": {
             "mode": "id",
@@ -1154,7 +1214,7 @@ def chat():
 
         # 3. LLM with Groq (+ optional web search)
         try:
-            reply, llm_time, search_time = generate_response_groq(transcription)
+            reply, llm_time, search_time = generate_response(transcription)
             response_data = {'type': 'response', 'text': reply, 'time_ms': llm_time}
             if search_time > 0:
                 response_data['search_ms'] = search_time
@@ -1213,16 +1273,46 @@ def health():
             'exchanges': len(conversation_history),
             'max': MAX_HISTORY,
         },
-        'search_triggers': SEARCH_TRIGGERS[:5],  # Show first 5 triggers
+        'search_routing': 'smart (date/time skip, real-time data search)',
     })
 
 
 @app.route('/clear', methods=['POST'])
 def clear_history():
-    """Clear conversation memory."""
+    """Clear conversation memory and topic cache."""
     global conversation_history
     conversation_history = []
-    return jsonify({'status': 'cleared', 'message': 'Conversation memory cleared'})
+    clear_topic_cache()  # Also clear the topic cache
+    return jsonify({'status': 'cleared', 'message': 'Conversation memory and topic cache cleared'})
+
+
+@app.route('/cancel', methods=['POST'])
+def cancel_active_request():
+    """
+    Cancel the active request (for barge-in handling).
+    Call this when the user starts speaking to interrupt the current response.
+    """
+    global _active_request_id
+    if _active_request_id:
+        cancelled = cancel_request(_active_request_id)
+        _active_request_id = None
+        return jsonify({
+            'status': 'cancelled' if cancelled else 'not_found',
+            'message': 'Active request cancelled' if cancelled else 'No active request found'
+        })
+    return jsonify({'status': 'no_request', 'message': 'No active request to cancel'})
+
+
+@app.route('/topic', methods=['GET'])
+def get_topic():
+    """Get the current topic cache state (for debugging)."""
+    cache = get_topic_cache()
+    return jsonify({
+        'topic': cache.topic,
+        'entity_type': cache.entity_type,
+        'confidence': cache.confidence,
+        'age_seconds': time.time() - cache.last_updated if cache.topic else None
+    })
 
 
 @app.route('/sts', methods=['POST'])
@@ -1258,7 +1348,7 @@ def sts_endpoint():
             yield f"data: {json.dumps({'type': 'text', 'content': transcription})}\n\n"
 
             # 3. LLM with Groq (+ optional web search)
-            reply, llm_time, search_time = generate_response_groq(transcription)
+            reply, llm_time, search_time = generate_response(transcription)
             yield f"data: {json.dumps({'type': 'text', 'content': reply})}\n\n"
 
             # 4. TTS with Cartesia (streaming at 48kHz for test harness compatibility)
@@ -1318,13 +1408,14 @@ def sts_sync_endpoint():
 
         # 3. TTS with Cartesia (collect all chunks)
         audio_chunks = []
-        ttfb_ms = None
+        ttfs_ms = None  # Time to First Speech (from request start)
         tts_start = time.time()
 
         for chunk_type, data in synthesize_speech_cartesia_streaming(reply, sample_rate=48000):
             if chunk_type == "audio":
-                if ttfb_ms is None:
-                    ttfb_ms = int((time.time() - tts_start) * 1000)
+                if ttfs_ms is None:
+                    # TRUE Time to First Speech = from request start to first audio chunk
+                    ttfs_ms = int((time.time() - total_start) * 1000)
                 audio_chunks.append(data)
 
         # Combine audio chunks and add WAV header
@@ -1333,14 +1424,24 @@ def sts_sync_endpoint():
 
         total_time = int((time.time() - total_start) * 1000)
 
-        return jsonify({
+        # Calculate TTS first chunk time
+        tts_first_ms = ttfs_ms - asr_time - llm_time - (search_time if search_time else 0)
+
+        response_data = {
             'audio': base64.b64encode(wav_bytes).decode('ascii'),
             'text': reply,
-            'ttfa_ms': ttfb_ms,
+            'ttfs_ms': ttfs_ms,  # Time to First Speech (the metric that matters!)
             'total_ms': total_time,
             'asr_ms': asr_time,
             'llm_ms': llm_time,
-        })
+            'tts_first_ms': tts_first_ms,
+        }
+
+        # Add search time if Perplexity was used
+        if search_time and search_time > 0:
+            response_data['search_ms'] = search_time
+
+        return jsonify(response_data)
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

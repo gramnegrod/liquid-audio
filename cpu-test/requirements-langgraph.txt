@@ -1,0 +1,21 @@
+# LangGraph Voice Assistant Stack Dependencies
+# Install with: pip install -r requirements-langgraph.txt
+
+# Core LangGraph
+langgraph>=0.2.0
+langchain-core>=0.3.0
+
+# Memory & Caching
+redis>=5.0.0  # Optional: for persistent session memory
+chromadb>=0.4.0  # Optional: for semantic caching
+sentence-transformers>=2.2.0  # Optional: for cache embeddings
+
+# Already required by base stack (listed for completeness)
+# groq
+# openai
+# httpx
+# flask
+# python-dotenv
+# pytz
+# numpy
+# assemblyai
